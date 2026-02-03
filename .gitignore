@@ -1,0 +1,92 @@
+# === Environment & Secrets ===
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+secrets/
+
+# === Frontend (Node.js / Vite / React) ===
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+frontend/.vite/
+frontend/.turbo/
+frontend/coverage/
+frontend/*.log
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/.DS_Store
+frontend/.eslintracheck
+
+# === Backend FastAPI (Python) ===
+backend-fastapi/__pycache__/
+backend-fastapi/*/__pycache__/
+backend-fastapi/*.py[cod]
+backend-fastapi/*$py.class
+backend-fastapi/venv/
+backend-fastapi/.venv/
+backend-fastapi/env/
+backend-fastapi/ENV/
+backend-fastapi/*.egg-info/
+backend-fastapi/.pytest_cache/
+backend-fastapi/.coverage
+backend-fastapi/htmlcov/
+backend-fastapi/*.log
+backend-fastapi/.python-version
+backend-fastapi/backend-dotnet/
+
+# === Backend .NET ===
+backend-dotnet/bin/
+backend-dotnet/obj/
+backend-dotnet/out/
+backend-dotnet/*.user
+backend-dotnet/*.suo
+backend-dotnet/*.userosscache
+backend-dotnet/*.sln.docstates
+backend-dotnet/.vs/
+backend-dotnet/VS_Code/
+backend-dotnet/TestResults/
+backend-dotnet/*.DotSettings.user
+
+# === Database ===
+*.sql
+*.sqlite
+*.sqlite3
+*.db
+mysql-data/
+
+# === IDE ===
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.history/
+
+# === OS ===
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# === Logs & Temp ===
+*.log
+*.tmp
+*.temp
+logs/
+tmp/
+temp/
+
+# === Build Artifacts ===
+*.tar.gz
+*.zip
+*.rar
+
+# === Claude ===
+.claude/
