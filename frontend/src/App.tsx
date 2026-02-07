@@ -2,15 +2,20 @@ import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { useEffect, useState } from 'react'
 import EditorPage from './pages/EditorPage'
+import ProjectsPage from './pages/ProjectsPage'
+import CodeGenPage from './pages/CodeGenPage'
 import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
+import DocumentsPage from './pages/DocumentsPage'
+import DocumentEditorPage from './pages/DocumentEditorPage'
+import ProfilePage from './pages/ProfilePage'
 
 // Particle component for background effect
 function Particles() {
   const [particles, setParticles] = useState<number[]>([])
 
   useEffect(() => {
-    const count = 50
+    const count = 20
     setParticles(Array.from({ length: count }, (_, i) => i))
   }, [])
 
@@ -41,13 +46,19 @@ function Navbar() {
         <div className="flex items-center justify-between h-16">
           <div className="flex items-center">
             <Link to="/" className="text-2xl font-bold tracking-wider neon-text float-animation">
-              &lt;SMART CODE /&gt;
+              &lt;SMART CODE&gt;
             </Link>
           </div>
           <div className="hidden md:block">
             <div className="ml-10 flex items-center space-x-2">
               <Link to="/" className="cyber-btn text-sm">
                 Home
+              </Link>
+              <Link to="/projects" className="cyber-btn text-sm">
+                Projects
+              </Link>
+              <Link to="/documents" className="cyber-btn text-sm" style={{ borderColor: 'var(--color-neon-purple)', color: 'var(--color-neon-purple)' }}>
+                Documents
               </Link>
               <Link to="/editor" className="cyber-btn text-sm">
                 Editor
@@ -61,6 +72,9 @@ function Navbar() {
 
               {isAuthenticated ? (
                 <>
+                  <Link to="/profile" className="cyber-btn text-sm" style={{ borderColor: 'var(--color-neon-green)', color: 'var(--color-neon-green)' }}>
+                    Profile
+                  </Link>
                   <span className="text-sm text-cyan-300 ml-4 px-4 py-2 border border-cyan-500/30 rounded">
                     Welcome, {user?.username}
                   </span>
@@ -189,19 +203,14 @@ function AppContent() {
         <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
           <Routes>
             <Route path="/" element={<HomePage />} />
+            <Route path="/projects" element={<ProjectsPage />} />
+            <Route path="/documents" element={<DocumentsPage />} />
+            <Route path="/documents/:id" element={<DocumentEditorPage />} />
+            <Route path="/documents/:id/edit" element={<DocumentEditorPage />} />
+            <Route path="/profile" element={<ProfilePage />} />
             <Route path="/editor" element={<EditorPage />} />
-            <Route path="/generate" element={
-              <div className="text-center py-20">
-                <h2 className="text-4xl font-bold neon-text mb-4">CODE GENERATION</h2>
-                <p className="text-cyan-300">Module loading...</p>
-              </div>
-            } />
-            <Route path="/review" element={
-              <div className="text-center py-20">
-                <h2 className="text-4xl font-bold neon-text-purple mb-4">CODE REVIEW</h2>
-                <p className="text-purple-300">Module loading...</p>
-              </div>
-            } />
+            <Route path="/generate" element={<CodeGenPage />} />
+            <Route path="/review" element={<CodeGenPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
           </Routes>

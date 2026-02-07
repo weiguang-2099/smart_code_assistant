@@ -7,7 +7,11 @@
 secrets/
 
 # === Frontend (Node.js / Vite / React) ===
+# Note: Dependencies are managed in virtual environment
 frontend/node_modules/
+frontend/package-lock.json
+frontend/yarn.lock
+frontend/pnpm-lock.yaml
 frontend/dist/
 frontend/build/
 frontend/.vite/
@@ -56,6 +60,10 @@ backend-dotnet/*.DotSettings.user
 *.sqlite3
 *.db
 mysql-data/
+
+# === Documentation ===
+doc/*.md
+doc/**/*.md
 
 # === IDE ===
 .vscode/

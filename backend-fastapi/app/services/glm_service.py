@@ -20,6 +20,73 @@ class GLMService:
 
     async def chat(
         self,
+        system_prompt: str,
+        user_prompt: str,
+        model: str = "glm-4",
+        temperature: float = 0.7,
+        top_p: float = 0.9,
+        max_tokens: Optional[int] = None,
+    ) -> str:
+        """
+        Call GLM chat model with system and user prompts.
+
+        Args:
+            system_prompt: System message content
+            user_prompt: User message content
+            model: Model name, default is glm-4
+            temperature: Temperature parameter, controls randomness, range 0-1
+            top_p: Sampling parameter, controls output diversity
+            max_tokens: Maximum generation tokens
+
+        Returns:
+            Response content string
+        """
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+
+        response = self.client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            top_p=top_p,
+            max_tokens=max_tokens,
+        )
+        return response.choices[0].message.content
+
+    async def chat_completion(
+        self,
+        messages: List[Dict[str, str]],
+        model: str = "glm-4",
+        temperature: float = 0.7,
+        top_p: float = 0.9,
+        max_tokens: Optional[int] = None,
+    ) -> str:
+        """
+        Call GLM chat model with message history.
+
+        Args:
+            messages: Message list, format: [{"role": "user", "content": "Hello"}]
+            model: Model name, default is glm-4
+            temperature: Temperature parameter, controls randomness, range 0-1
+            top_p: Sampling parameter, controls output diversity
+            max_tokens: Maximum generation tokens
+
+        Returns:
+            Response content string
+        """
+        response = self.client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            top_p=top_p,
+            max_tokens=max_tokens,
+        )
+        return response.choices[0].message.content
+
+    async def chat_old(
+        self,
         messages: List[Dict[str, str]],
         model: str = "glm-4",
         temperature: float = 0.7,

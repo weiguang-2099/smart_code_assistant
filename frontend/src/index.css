@@ -91,7 +91,7 @@ body {
   overflow-x: hidden;
 }
 
-/* Scanline overlay */
+/* Scanline overlay - removed animation for better performance */
 body::before {
   content: '';
   position: fixed;
@@ -101,14 +101,13 @@ body::before {
   height: 100%;
   background: repeating-linear-gradient(
     0deg,
-    rgba(0, 240, 255, 0.03) 0px,
-    rgba(0, 240, 255, 0.03) 1px,
+    rgba(0, 240, 255, 0.02) 0px,
+    rgba(0, 240, 255, 0.02) 1px,
     transparent 1px,
-    transparent 2px
+    transparent 4px
   );
   pointer-events: none;
-  z-index: 9999;
-  animation: scanline 8s linear infinite;
+  z-index: 9998;
 }
 
 /* Cyber grid background */
@@ -130,10 +129,13 @@ body::after {
 /* Neon button styles */
 button, a {
   cursor: pointer;
+  position: relative;
+  z-index: 10;
 }
 
 .cyber-btn {
   position: relative;
+  z-index: 10;
   padding: 12px 24px;
   background: transparent;
   border: 2px solid var(--color-neon-blue);
@@ -141,8 +143,9 @@ button, a {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 2px;
-  transition: all 0.3s ease;
+  transition: background 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
   overflow: hidden;
+  will-change: transform;
 }
 
 .cyber-btn::before {
@@ -155,10 +158,11 @@ button, a {
   background: linear-gradient(
     90deg,
     transparent,
-    rgba(0, 240, 255, 0.3),
+    rgba(0, 240, 255, 0.2),
     transparent
   );
-  transition: left 0.5s ease;
+  transition: left 0.3s ease;
+  pointer-events: none;
 }
 
 .cyber-btn:hover::before {
@@ -166,16 +170,17 @@ button, a {
 }
 
 .cyber-btn:hover {
-  background: rgba(0, 240, 255, 0.1);
-  box-shadow: 0 0 20px var(--color-neon-blue),
-              0 0 40px var(--color-neon-blue),
-              inset 0 0 20px rgba(0, 240, 255, 0.2);
-  transform: translateY(-2px);
+  background: rgba(0, 240, 255, 0.15);
+  box-shadow: 0 0 15px var(--color-neon-blue);
+  transform: translateY(-1px);
 }
 
 .cyber-btn:active {
-  transform: translateY(0);
-  animation: click-ripple 0.6s ease-out;
+  transform: translateY(0) !important;
+}
+
+.cyber-btn:disabled {
+  pointer-events: none;
 }
 
 /* Glowing card effect */
@@ -184,55 +189,26 @@ button, a {
   border: 1px solid rgba(0, 240, 255, 0.3);
   border-radius: 8px;
   backdrop-filter: blur(10px);
-  transition: all 0.3s ease;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
   position: relative;
   overflow: hidden;
 }
 
-.cyber-card::before {
-  content: '';
-  position: absolute;
-  top: -50%;
-  left: -50%;
-  width: 200%;
-  height: 200%;
-  background: linear-gradient(
-    45deg,
-    transparent,
-    rgba(0, 240, 255, 0.1),
-    transparent
-  );
-  transform: rotate(45deg);
-  transition: all 0.5s ease;
-}
-
-.cyber-card:hover::before {
-  left: 100%;
-}
-
 .cyber-card:hover {
   border-color: var(--color-neon-blue);
-  box-shadow: 0 0 30px rgba(0, 240, 255, 0.3),
-              inset 0 0 30px rgba(0, 240, 255, 0.1);
-  transform: translateY(-5px) scale(1.02);
+  box-shadow: 0 0 15px rgba(0, 240, 255, 0.2);
+  transform: translateY(-2px);
 }
 
 /* Neon text effect */
 .neon-text {
   color: var(--color-neon-blue);
-  text-shadow:
-    0 0 5px var(--color-neon-blue),
-    0 0 10px var(--color-neon-blue),
-    0 0 20px var(--color-neon-blue),
-    0 0 40px var(--color-neon-blue);
+  text-shadow: 0 0 10px var(--color-neon-blue), 0 0 20px var(--color-neon-blue);
 }
 
 .neon-text-purple {
   color: var(--color-neon-purple);
-  text-shadow:
-    0 0 5px var(--color-neon-purple),
-    0 0 10px var(--color-neon-purple),
-    0 0 20px var(--color-neon-purple);
+  text-shadow: 0 0 10px var(--color-neon-purple), 0 0 20px var(--color-neon-purple);
 }
 
 /* Animated border */
@@ -273,21 +249,40 @@ button, a {
 }
 
 /* Input styles */
-input, textarea {
-  background: rgba(18, 18, 26, 0.8) !important;
+input, textarea, select {
+  background: rgba(18, 18, 26, 0.9) !important;
   border: 1px solid rgba(0, 240, 255, 0.3) !important;
   color: #e0e0e0 !important;
-  transition: all 0.3s ease !important;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease !important;
+  cursor: text !important;
+  position: relative;
+  z-index: 1;
 }
 
-input:focus, textarea:focus {
+input:focus, textarea:focus, select:focus {
   outline: none !important;
   border-color: var(--color-neon-blue) !important;
-  box-shadow: 0 0 20px rgba(0, 240, 255, 0.3) !important;
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.2) !important;
 }
 
 input::placeholder, textarea::placeholder {
   color: rgba(224, 224, 224, 0.5) !important;
+}
+
+/* Ensure inputs and buttons are always clickable */
+.cyber-card input,
+.cyber-card textarea,
+.cyber-card select,
+.cyber-card button,
+.cyber-card a {
+  position: relative;
+  z-index: 10;
+}
+
+/* Ensure all buttons and links are above overlays */
+.cyber-card a,
+.cyber-card button {
+  z-index: 100;
 }
 
 /* Scrollbar */
@@ -322,13 +317,14 @@ input::placeholder, textarea::placeholder {
 
 .particle {
   position: absolute;
-  width: 4px;
-  height: 4px;
+  width: 3px;
+  height: 3px;
   background: var(--color-neon-blue);
   border-radius: 50%;
-  box-shadow: 0 0 10px var(--color-neon-blue);
-  animation: particle-float 15s infinite linear;
-  opacity: 0.6;
+  box-shadow: 0 0 6px var(--color-neon-blue);
+  animation: particle-float 20s infinite linear;
+  opacity: 0.5;
+  will-change: transform, opacity;
 }
 
 @keyframes particle-float {

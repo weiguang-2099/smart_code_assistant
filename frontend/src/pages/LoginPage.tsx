@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
+import { useAuth } from '../contexts/AuthContext'
 
 interface LoginResponse {
   access_token: string
@@ -16,6 +17,7 @@ interface LoginResponse {
 
 export default function LoginPage() {
   const navigate = useNavigate()
+  const { login } = useAuth()
   const [formData, setFormData] = useState({
     username: '',
     password: '',
@@ -52,9 +54,8 @@ export default function LoginPage() {
         throw new Error(data.detail || 'Login failed')
       }
 
-      // Store token and user info
-      localStorage.setItem('access_token', data.access_token)
-      localStorage.setItem('user', JSON.stringify(data.user))
+      // Store token and user info using AuthContext
+      login(data.access_token, data.user)
 
       // Navigate to home or editor
       navigate('/')
@@ -100,6 +101,7 @@ export default function LoginPage() {
                   placeholder="Enter your credentials"
                   value={formData.username}
                   onChange={handleChange}
+                  disabled={loading}
                 />
               </div>
 
@@ -116,6 +118,7 @@ export default function LoginPage() {
                   placeholder="Enter access code"
                   value={formData.password}
                   onChange={handleChange}
+                  disabled={loading}
                 />
               </div>
             </div>

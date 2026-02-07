@@ -33,6 +33,7 @@ class Project(Base):
     # Relationships
     owner = relationship("User", back_populates="projects")
     code_files = relationship("CodeFile", back_populates="project", cascade="all, delete-orphan")
+    documents = relationship("Document", back_populates="project", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
         return f"<Project(id={self.id}, name='{self.name}', owner_id={self.owner_id})>"

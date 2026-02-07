@@ -3,14 +3,17 @@ Security utilities for authentication and authorization.
 """
 from datetime import datetime, timedelta
 from typing import Optional
+import logging
 
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
 from app.core.config import settings
 
-# Password hashing context
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+logger = logging.getLogger(__name__)
+
+# Password hashing context - using argon2 (more secure, no bcrypt issues)
+pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -78,8 +81,13 @@ def decode_access_token(token: str) -> Optional[dict]:
     """
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        logger.debug(f"JWT decoded successfully, payload: {payload}")
         return payload
-    except JWTError:
+    except JWTError as e:
+        logger.warning(f"JWT decode failed: {str(e)}")
+        return None
+    except Exception as e:
+        logger.error(f"Unexpected error decoding JWT: {str(e)}")
         return None
 
 
@@ -95,10 +103,21 @@ def get_token_payload(token: str) -> Optional[dict]:
     """
     payload = decode_access_token(token)
     if payload is None:
+        logger.warning("decode_access_token returned None")
         return None
 
-    user_id: Optional[int] = payload.get("sub")
-    if user_id is None:
+    sub = payload.get("sub")
+    logger.debug(f"Token payload sub: {sub}, full payload: {payload}")
+
+    if sub is None:
+        logger.warning("Token payload missing 'sub' field")
+        return None
+
+    # Convert sub to int (it's stored as string in JWT)
+    try:
+        user_id = int(sub)
+    except (ValueError, TypeError) as e:
+        logger.warning(f"Failed to convert sub '{sub}' to int: {str(e)}")
         return None
 
     return {"user_id": user_id, **payload}

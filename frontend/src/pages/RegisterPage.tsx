@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
+import { useAuth } from '../contexts/AuthContext'
 
 interface RegisterResponse {
   id: number
@@ -16,6 +17,7 @@ interface RegisterResponse {
 
 export default function RegisterPage() {
   const navigate = useNavigate()
+  const { login } = useAuth()
   const [formData, setFormData] = useState({
     username: '',
     email: '',
@@ -24,6 +26,7 @@ export default function RegisterPage() {
     confirmPassword: '',
   })
   const [error, setError] = useState('')
+  const [success, setSuccess] = useState(false)
   const [loading, setLoading] = useState(false)
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -37,6 +40,7 @@ export default function RegisterPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
+    setSuccess(false)
 
     // Validate passwords match
     if (formData.password !== formData.confirmPassword) {
@@ -70,12 +74,24 @@ export default function RegisterPage() {
         throw new Error(data.detail || 'Registration failed')
       }
 
-      // Store token and user info
-      localStorage.setItem('access_token', data.access_token)
-      localStorage.setItem('user', JSON.stringify(data))
+      // Store token and user info using AuthContext
+      const userData = {
+        id: data.id,
+        username: data.username,
+        email: data.email,
+        full_name: data.full_name,
+        is_active: data.is_active,
+        is_superuser: data.is_superuser,
+      }
+      login(data.access_token, userData)
 
-      // Navigate to home or editor
-      navigate('/')
+      // Show success message
+      setSuccess(true)
+
+      // Navigate to home after delay
+      setTimeout(() => {
+        navigate('/')
+      }, 2000)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred')
     } finally {
@@ -103,6 +119,18 @@ export default function RegisterPage() {
             </p>
           </div>
 
+          {/* Success Message */}
+          {success && (
+            <div className="mb-6 p-4 border border-green-500/50 rounded bg-green-500/10 animate-pulse">
+              <p className="text-sm text-green-400 text-center">
+                ✓ Registration successful! Welcome, {formData.username}!
+              </p>
+              <p className="text-xs text-green-300 text-center mt-2">
+                Redirecting to home...
+              </p>
+            </div>
+          )}
+
           <form className="space-y-5" onSubmit={handleSubmit}>
             <div className="space-y-4">
               <div>
@@ -119,6 +147,7 @@ export default function RegisterPage() {
                   placeholder="Choose identifier (min 3 chars)"
                   value={formData.username}
                   onChange={handleChange}
+                  disabled={loading || success}
                 />
               </div>
 
@@ -135,6 +164,7 @@ export default function RegisterPage() {
                   placeholder="Enter communication channel"
                   value={formData.email}
                   onChange={handleChange}
+                  disabled={loading || success}
                 />
               </div>
 
@@ -150,6 +180,7 @@ export default function RegisterPage() {
                   placeholder="Display name (optional)"
                   value={formData.full_name}
                   onChange={handleChange}
+                  disabled={loading || success}
                 />
               </div>
 
@@ -167,6 +198,7 @@ export default function RegisterPage() {
                   placeholder="Create access code (min 6 chars)"
                   value={formData.password}
                   onChange={handleChange}
+                  disabled={loading || success}
                 />
               </div>
 
@@ -183,6 +215,7 @@ export default function RegisterPage() {
                   placeholder="Verify access code"
                   value={formData.confirmPassword}
                   onChange={handleChange}
+                  disabled={loading || success}
                 />
               </div>
             </div>
@@ -195,7 +228,7 @@ export default function RegisterPage() {
 
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || success}
               className="cyber-btn w-full py-3 text-base font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
               style={{ borderColor: 'var(--color-neon-green)', color: 'var(--color-neon-green)' }}
             >
@@ -203,6 +236,11 @@ export default function RegisterPage() {
                 <span className="flex items-center justify-center gap-2">
                   <span className="animate-spin">◌</span>
                   PROCESSING...
+                </span>
+              ) : success ? (
+                <span className="flex items-center justify-center gap-2">
+                  <span>✓</span>
+                  SUCCESS!
                 </span>
               ) : (
                 '► CREATE IDENTITY'
