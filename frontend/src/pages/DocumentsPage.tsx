@@ -1,9 +1,87 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useMemo, memo } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { documentService } from '../services/documentService'
 import type { Document, DocumentListParams } from '../types/document'
 import PDFUploader from '../components/PDFUploader'
+
+// Memoized document card component for better performance
+const DocumentCard = memo(({ 
+  doc, 
+  onDelete 
+}: { 
+  doc: Document
+  onDelete: (id: number) => void 
+}) => {
+  return (
+    <div
+      key={doc.id}
+      className="cyber-card p-6 hover:border-cyan-500/50 transition-all group relative overflow-hidden"
+    >
+      {/* Hover glow effect */}
+      <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/0 via-purple-500/0 to-pink-500/0 group-hover:from-cyan-500/5 group-hover:via-purple-500/5 group-hover:to-pink-500/5 transition-all duration-300 pointer-events-none"></div>
+      
+      <div className="relative z-10">
+        <div className="flex items-start justify-between mb-3">
+          <Link
+            to={`/documents/${doc.id}`}
+            className="text-xl font-semibold neon-text truncate flex-1 hover:text-cyan-400 transition-colors"
+          >
+            {doc.title}
+          </Link>
+          <div className="flex gap-1 ml-2">
+            <Link
+              to={`/documents/${doc.id}/edit`}
+              className="text-gray-400 hover:text-cyan-400 px-2 py-1 transition-colors"
+              title="Edit"
+            >
+              ✎
+            </Link>
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                onDelete(doc.id)
+              }}
+              className="text-gray-400 hover:text-red-400 px-2 py-1 transition-colors"
+              title="Delete"
+            >
+              🗑
+            </button>
+          </div>
+        </div>
+
+        {doc.description && (
+          <p className="text-gray-400 text-sm mb-4 line-clamp-2">{doc.description}</p>
+        )}
+
+        <div className="flex flex-wrap gap-2 mb-4">
+          {doc.category && (
+            <span className="text-xs px-3 py-1 border border-cyan-500/30 text-cyan-300 rounded-full backdrop-blur-sm bg-cyan-500/10">
+              {doc.category}
+            </span>
+          )}
+          <span className="text-xs px-3 py-1 border border-purple-500/30 text-purple-300 rounded-full backdrop-blur-sm bg-purple-500/10">
+            v{doc.version_count}
+          </span>
+          {doc.is_published && (
+            <span className="text-xs px-3 py-1 border border-green-500/30 text-green-300 rounded-full backdrop-blur-sm bg-green-500/10">
+              Published
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between text-xs text-gray-500">
+          <span className="flex items-center gap-1">
+            <span className="text-cyan-400">◆</span>
+            {new Date(doc.updated_at).toLocaleDateString()}
+          </span>
+        </div>
+      </div>
+    </div>
+  )
+})
+
+DocumentCard.displayName = 'DocumentCard'
 
 export default function DocumentsPage() {
   const { isAuthenticated, token } = useAuth()
@@ -24,7 +102,8 @@ export default function DocumentsPage() {
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [showUploadModal, setShowUploadModal] = useState(false)
 
-  const fetchDocuments = async (pageNum = 1) => {
+  // Memoized fetch function
+  const fetchDocuments = useCallback(async (pageNum = 1) => {
     if (!isAuthenticated || !token) {
       setLoading(false)
       return
@@ -53,13 +132,13 @@ export default function DocumentsPage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [isAuthenticated, token, search, category, sortBy, sortOrder])
 
   useEffect(() => {
     fetchDocuments()
   }, [isAuthenticated, token])
 
-  // Handle filter changes with debounce
+  // Debounced filter changes
   useEffect(() => {
     const timer = setTimeout(() => {
       if (isAuthenticated) {
@@ -67,10 +146,11 @@ export default function DocumentsPage() {
       }
     }, 500)
     return () => clearTimeout(timer)
-  }, [search, category, sortBy, sortOrder])
+  }, [search, category, sortBy, sortOrder, isAuthenticated, fetchDocuments])
 
-  const handleDeleteDocument = async (documentId: number) => {
-    if (!confirm('Are you sure you want to delete this document?')) {
+  // Memoized delete handler
+  const handleDeleteDocument = useCallback(async (documentId: number) => {
+    if (!confirm('⚠ DELETE DOCUMENT?\n\nThis action cannot be undone.')) {
       return
     }
 
@@ -80,15 +160,28 @@ export default function DocumentsPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete document')
     }
-  }
+  }, [token, page, fetchDocuments])
+
+  // Memoized pagination handlers
+  const handlePrevPage = useCallback(() => {
+    if (page > 1) fetchDocuments(page - 1)
+  }, [page, fetchDocuments])
+
+  const handleNextPage = useCallback(() => {
+    if (page < totalPages) fetchDocuments(page + 1)
+  }, [page, totalPages, fetchDocuments])
 
   if (!isAuthenticated) {
     return (
       <div className="text-center py-20">
-        <h2 className="text-4xl font-bold neon-text mb-4">ACCESS DENIED</h2>
-        <p className="text-cyan-300 mb-8">Please authenticate to access your documents</p>
+        <div className="mb-6">
+          <div className="text-6xl mb-4 animate-pulse">🔒</div>
+          <h2 className="text-4xl font-bold neon-text mb-4 tracking-wider">ACCESS DENIED</h2>
+          <div className="h-1 w-48 mx-auto bg-gradient-to-r from-transparent via-cyan-500 to-transparent mb-6"></div>
+        </div>
+        <p className="text-cyan-300 mb-8 text-lg">Initialize authentication protocol to proceed</p>
         <Link to="/login" className="cyber-btn">
-          Initialize Session
+          &gt; AUTHENTICATE &lt;
         </Link>
       </div>
     )
@@ -96,43 +189,55 @@ export default function DocumentsPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
+      {/* Header with enhanced styling */}
       <div className="flex flex-wrap justify-between items-center gap-4">
         <div>
-          <h2 className="text-3xl font-bold neon-text tracking-wider">{'<DOCUMENTS />'}</h2>
-          <div className="h-px w-32 bg-gradient-to-r from-cyan-500 to-transparent mt-2"></div>
-          <p className="text-gray-400 text-sm mt-2">Total: {total} documents</p>
+          <div className="flex items-center gap-3 mb-2">
+            <span className="text-cyan-400 text-2xl">◆</span>
+            <h2 className="text-3xl font-bold neon-text tracking-wider">{'<DOCUMENTS />'}</h2>
+          </div>
+          <div className="h-1 w-32 bg-gradient-to-r from-cyan-500 via-purple-500 to-transparent"></div>
+          <div className="flex items-center gap-2 text-sm mt-2">
+            <span className="text-gray-500">TOTAL:</span>
+            <span className="text-cyan-400 font-bold">{total}</span>
+            <span className="text-gray-500">documents</span>
+          </div>
         </div>
         <div className="flex gap-3">
           <button
             onClick={() => setShowUploadModal(true)}
-            className="cyber-btn px-4 py-2 text-sm"
+            className="cyber-btn px-4 py-2 text-sm flex items-center gap-2"
             style={{ borderColor: 'var(--color-neon-purple)', color: 'var(--color-neon-purple)' }}
           >
-            📄 Upload PDF
+            <span>📄</span>
+            <span>UPLOAD PDF</span>
           </button>
           <button
             onClick={() => setShowCreateModal(true)}
-            className="cyber-btn px-4 py-2 text-sm"
+            className="cyber-btn px-4 py-2 text-sm flex items-center gap-2"
             style={{ borderColor: 'var(--color-neon-green)', color: 'var(--color-neon-green)' }}
           >
-            + New Document
+            <span>+</span>
+            <span>NEW DOCUMENT</span>
           </button>
         </div>
       </div>
 
-      {/* Filters */}
-      <div className="cyber-card p-4">
+      {/* Enhanced Filters */}
+      <div className="cyber-card p-4 backdrop-blur-md">
         <div className="flex flex-wrap gap-4">
           {/* Search */}
           <div className="flex-1 min-w-[200px]">
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search documents..."
-              className="w-full px-4 py-2 bg-gray-900/50 border border-cyan-500/30 rounded text-gray-100 placeholder-gray-500 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 transition-all"
-            />
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-cyan-400">🔍</span>
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search documents..."
+                className="w-full pl-10 px-4 py-2 bg-gray-900/50 border border-cyan-500/30 rounded text-gray-100 placeholder-gray-500 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 transition-all"
+              />
+            </div>
           </div>
 
           {/* Category */}
@@ -177,121 +282,80 @@ export default function DocumentsPage() {
 
       {/* Error Message */}
       {error && (
-        <div className="p-4 border border-red-500/50 rounded bg-red-500/10 flex justify-between items-center">
-          <p className="text-sm text-red-400">{error}</p>
-          <button onClick={() => setError('')} className="text-red-400 hover:text-white">✕</button>
+        <div className="p-4 border border-red-500/50 rounded bg-red-500/10 flex justify-between items-center backdrop-blur-sm">
+          <div className="flex items-center gap-2">
+            <span className="text-red-400">⚠</span>
+            <p className="text-sm text-red-400">{error}</p>
+          </div>
+          <button onClick={() => setError('')} className="text-red-400 hover:text-white transition-colors">✕</button>
         </div>
       )}
 
       {/* Loading State */}
       {loading ? (
         <div className="text-center py-12">
-          <div className="animate-spin text-4xl neon-text">◌</div>
-          <p className="text-gray-400 mt-4">Loading documents...</p>
+          <div className="inline-block relative">
+            <div className="animate-spin text-4xl neon-text">◌</div>
+            <div className="absolute inset-0 animate-ping text-4xl neon-text opacity-30">◌</div>
+          </div>
+          <p className="text-gray-400 mt-4 tracking-wider">LOADING DOCUMENTS...</p>
         </div>
       ) : documents.length === 0 ? (
         /* Empty State */
-        <div className="cyber-card p-12 text-center">
-          <div className="text-6xl mb-4">📄</div>
-          <h3 className="text-2xl font-semibold neon-text mb-4">No Documents Yet</h3>
-          <p className="text-gray-400 mb-8">Upload a PDF or create a new document to get started</p>
+        <div className="cyber-card p-12 text-center backdrop-blur-md">
+          <div className="text-6xl mb-4 opacity-50">📄</div>
+          <h3 className="text-2xl font-semibold neon-text mb-4 tracking-wider">NO DOCUMENTS DETECTED</h3>
+          <div className="h-1 w-48 mx-auto bg-gradient-to-r from-transparent via-cyan-500 to-transparent mb-6"></div>
+          <p className="text-gray-400 mb-8">Initialize your first document to begin</p>
           <div className="flex justify-center gap-4">
             <button
               onClick={() => setShowUploadModal(true)}
               className="cyber-btn px-6 py-3"
               style={{ borderColor: 'var(--color-neon-purple)', color: 'var(--color-neon-purple)' }}
             >
-              Upload PDF
+              📄 UPLOAD PDF
             </button>
             <button
               onClick={() => setShowCreateModal(true)}
               className="cyber-btn px-6 py-3"
               style={{ borderColor: 'var(--color-neon-green)', color: 'var(--color-neon-green)' }}
             >
-              Create Document
+              + CREATE DOCUMENT
             </button>
           </div>
         </div>
       ) : (
-        /* Documents Grid */
+        /* Documents Grid - Using memoized components */
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {documents.map((doc) => (
-            <div
-              key={doc.id}
-              className="cyber-card p-6 hover:border-cyan-500/50 transition-all float-animation"
-            >
-              <div className="flex items-start justify-between mb-3">
-                <Link
-                  to={`/documents/${doc.id}`}
-                  className="text-xl font-semibold neon-text truncate flex-1 hover:text-cyan-400"
-                >
-                  {doc.title}
-                </Link>
-                <div className="flex gap-1 ml-2">
-                  <Link
-                    to={`/documents/${doc.id}/edit`}
-                    className="text-gray-400 hover:text-cyan-400 px-2 py-1"
-                    title="Edit"
-                  >
-                    ✎
-                  </Link>
-                  <button
-                    onClick={() => handleDeleteDocument(doc.id)}
-                    className="text-gray-400 hover:text-red-400 px-2 py-1"
-                    title="Delete"
-                  >
-                    🗑
-                  </button>
-                </div>
-              </div>
-
-              {doc.description && (
-                <p className="text-gray-400 text-sm mb-4 line-clamp-2">{doc.description}</p>
-              )}
-
-              <div className="flex flex-wrap gap-2 mb-4">
-                {doc.category && (
-                  <span className="text-xs px-2 py-1 border border-cyan-500/30 text-cyan-300 rounded">
-                    {doc.category}
-                  </span>
-                )}
-                <span className="text-xs px-2 py-1 border border-purple-500/30 text-purple-300 rounded">
-                  v{doc.version_count}
-                </span>
-                {doc.is_published && (
-                  <span className="text-xs px-2 py-1 border border-green-500/30 text-green-300 rounded">
-                    Published
-                  </span>
-                )}
-              </div>
-
-              <div className="flex items-center justify-between text-xs text-gray-500">
-                <span>Updated: {new Date(doc.updated_at).toLocaleDateString()}</span>
-              </div>
-            </div>
+            <DocumentCard key={doc.id} doc={doc} onDelete={handleDeleteDocument} />
           ))}
         </div>
       )}
 
-      {/* Pagination */}
+      {/* Enhanced Pagination */}
       {totalPages > 1 && (
-        <div className="flex justify-center gap-2 mt-8">
+        <div className="flex justify-center items-center gap-4 mt-8">
           <button
-            onClick={() => fetchDocuments(page - 1)}
+            onClick={handlePrevPage}
             disabled={page === 1}
-            className="cyber-btn px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            className="cyber-btn px-4 py-2 text-sm disabled:opacity-30 disabled:cursor-not-allowed"
           >
-            Previous
+            &lt; PREV
           </button>
-          <span className="px-4 py-2 text-gray-400 text-sm">
-            Page {page} of {totalPages}
-          </span>
+          
+          <div className="flex items-center gap-2 px-6 py-2 cyber-card backdrop-blur-sm">
+            <span className="text-cyan-400 font-bold">{page}</span>
+            <span className="text-gray-500">/</span>
+            <span className="text-gray-400">{totalPages}</span>
+          </div>
+          
           <button
-            onClick={() => fetchDocuments(page + 1)}
+            onClick={handleNextPage}
             disabled={page === totalPages}
-            className="cyber-btn px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            className="cyber-btn px-4 py-2 text-sm disabled:opacity-30 disabled:cursor-not-allowed"
           >
-            Next
+            NEXT &gt;
           </button>
         </div>
       )}
@@ -365,15 +429,18 @@ function CreateDocumentModal({ token, onClose, onComplete, onError }: CreateDocu
   }
 
   return (
-    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-      <div className="cyber-card max-w-md w-full p-8">
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fadeIn">
+      <div className="cyber-card max-w-md w-full p-8 animate-slideUp">
         <div className="flex justify-between items-center mb-6">
-          <h3 className="text-2xl font-bold neon-text-purple tracking-wider">
-            {'<NEW DOCUMENT />'}
-          </h3>
+          <div>
+            <h3 className="text-2xl font-bold neon-text-purple tracking-wider">
+              {'<NEW DOCUMENT />'}
+            </h3>
+            <div className="h-0.5 w-24 bg-gradient-to-r from-purple-500 to-transparent mt-1"></div>
+          </div>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-white text-2xl"
+            className="text-gray-400 hover:text-white text-2xl transition-colors"
           >
             ×
           </button>
@@ -381,7 +448,7 @@ function CreateDocumentModal({ token, onClose, onComplete, onError }: CreateDocu
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
-            <label className="block text-sm font-medium text-purple-300 mb-2">
+            <label className="block text-sm font-medium text-purple-300 mb-2 tracking-wider">
               TITLE *
             </label>
             <input
@@ -395,7 +462,7 @@ function CreateDocumentModal({ token, onClose, onComplete, onError }: CreateDocu
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-purple-300 mb-2">
+            <label className="block text-sm font-medium text-purple-300 mb-2 tracking-wider">
               DESCRIPTION
             </label>
             <textarea
@@ -408,7 +475,7 @@ function CreateDocumentModal({ token, onClose, onComplete, onError }: CreateDocu
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-purple-300 mb-2">
+            <label className="block text-sm font-medium text-purple-300 mb-2 tracking-wider">
               CATEGORY
             </label>
             <select
@@ -431,15 +498,15 @@ function CreateDocumentModal({ token, onClose, onComplete, onError }: CreateDocu
               onClick={onClose}
               className="flex-1 cyber-btn py-3"
             >
-              Cancel
+              CANCEL
             </button>
             <button
               type="submit"
               disabled={creating || !title.trim()}
-              className="flex-1 cyber-btn py-3 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex-1 cyber-btn py-3 disabled:opacity-30 disabled:cursor-not-allowed"
               style={{ borderColor: 'var(--color-neon-green)', color: 'var(--color-neon-green)' }}
             >
-              {creating ? 'Creating...' : 'Create'}
+              {creating ? 'CREATING...' : 'CREATE'}
             </button>
           </div>
         </form>

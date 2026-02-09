@@ -10,6 +10,7 @@ This module handles:
 import logging
 from typing import Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -19,6 +20,7 @@ from app.schemas.document import (
     PDFUploadResponse,
 )
 from app.models.user import User
+from app.models.document import Document, RawVersion
 from app.services.pdf_service import pdf_service
 from app.services.format_service import format_service
 
@@ -45,12 +47,11 @@ async def parse_pdf(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Parse PDF file and convert to Markdown with TipTap JSON.
+    Parse PDF file, convert to Markdown/TipTap, and create document in database.
 
-    This endpoint accepts a PDF file, parses it using the PDF service,
-    and returns both Markdown and TipTap JSON formats.
-
-    TODO: Implement third-party PDF API integration for actual parsing.
+    This endpoint accepts a PDF file, parses it using the Datalab Marker API,
+    converts to both Markdown and TipTap JSON formats, then creates a new
+    document record with the content as the first version.
 
     Args:
         file: PDF file to parse
@@ -61,7 +62,7 @@ async def parse_pdf(
         db: Database session
 
     Returns:
-        PDFUploadResponse: Parsed content in both formats
+        PDFUploadResponse: Parsed content with document_id and version_id
 
     Raises:
         HTTPException: If file is invalid or parsing fails
@@ -113,17 +114,57 @@ async def parse_pdf(
     # Use provided title or fallback to filename
     document_title = title or file.filename.replace(".pdf", "")
 
-    # Note: This endpoint only parses and returns content.
-    # To create an actual document, use the returned content with
-    # POST /api/v1/documents endpoint.
+    # ========== CREATE DOCUMENT IN DATABASE ==========
+    try:
+        # Step 1: Create document record
+        new_document = Document(
+            user_id=current_user.id,
+            title=document_title,
+            description=description,
+            category=category,
+        )
+        db.add(new_document)
+        await db.flush()  # Get document ID
 
-    return PDFUploadResponse(
-        # Placeholder document_id (not actually created)
-        document_id=0,
-        version_id=0,
-        markdown_content=markdown_content,
-        tiptap_content=tiptap_content,
-    )
+        # Step 2: Create first version with parsed content
+        first_version = RawVersion(
+            document_id=new_document.id,
+            version_number=1,
+            markdown_content=markdown_content,
+            tiptap_content=tiptap_content,
+            source_type="pdf_upload",
+            change_summary=f"Imported from PDF: {file.filename}",
+            created_by=current_user.id,
+        )
+        db.add(first_version)
+        await db.flush()  # Get version ID
+
+        # Step 3: Set document's current version
+        new_document.current_version_id = first_version.id
+
+        # Step 4: Commit transaction
+        await db.commit()
+        await db.refresh(new_document)
+        await db.refresh(first_version)
+
+        logger.info(
+            f"Created document {new_document.id} with version {first_version.id} from PDF"
+        )
+
+        return PDFUploadResponse(
+            document_id=new_document.id,
+            version_id=first_version.id,
+            markdown_content=markdown_content,
+            tiptap_content=tiptap_content,
+        )
+
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Failed to create document in database: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to save document: {str(e)}"
+        )
 
 
 @router.post("/convert-to-tiptap")

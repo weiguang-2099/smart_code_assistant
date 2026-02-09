@@ -1,204 +1,334 @@
 """
-PDF parsing service for converting PDF files to Markdown.
+PDF parsing service using Datalab Marker API.
 
-This service provides functionality to parse PDF documents and extract
-their content as Markdown format. Currently a placeholder for third-party
-API integration.
+This service converts PDF documents to Markdown format by calling the
+Datalab Marker API (https://www.datalab.to/api/v1/marker).
 
-TODO: Integrate third-party PDF parsing API (e.g., Adobe PDF Services,
-Cloudmersive, or local libraries like PyMuPDF/pdfplumber).
+API flow:
+1. Submit PDF file via POST -> receive request_id and check_url
+2. Poll the check_url until status is "complete" or "failed"
+3. Return the markdown content and extracted images
+
+Docs: https://documentation.datalab.to/docs/recipes/marker/conversion-api-overview
 """
+import asyncio
+import base64
 import os
 import tempfile
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 import logging
 
+import httpx
+
+from app.core.config import settings
+
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+DEFAULT_MODE = "balanced"  # "fast" | "balanced" | "accurate"
+DEFAULT_OUTPUT_FORMAT = "markdown"
+POLL_INTERVAL_SECONDS = 2
+MAX_POLL_ATTEMPTS = 300  # 300 * 2s = 10 minutes max wait
 
 
 class PDFParseService:
     """
-    PDF parsing service with placeholder implementation.
+    PDF parsing service powered by Datalab Marker API.
 
-    Features to implement:
-    - PDF text extraction to Markdown
-    - Image extraction from PDF
+    Features:
+    - PDF text extraction to Markdown / HTML / JSON
+    - Image extraction from PDF (base64 encoded)
     - Table recognition and conversion
-    - Preserve document structure (headings, lists, etc.)
+    - Preserves document structure (headings, lists, etc.)
     """
 
     def __init__(self):
         """Initialize PDF parsing service."""
         self.temp_dir = tempfile.gettempdir()
-        logger.info("PDFParseService initialized (placeholder mode)")
+        self.api_url = settings.DATALAB_API_URL
+        self.api_key = settings.DATALAB_API_KEY
+        if self.api_key:
+            logger.info("PDFParseService initialized (Datalab Marker API)")
+        else:
+            logger.warning(
+                "PDFParseService: DATALAB_API_KEY is not set. "
+                "PDF parsing will fail until a valid key is configured."
+            )
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _build_headers(self) -> Dict[str, str]:
+        """Build HTTP headers for Datalab API requests."""
+        return {"X-API-Key": self.api_key}
+
+    async def _submit_file(
+        self,
+        file_path: str,
+        output_format: str = DEFAULT_OUTPUT_FORMAT,
+        mode: str = DEFAULT_MODE,
+        extract_images: bool = True,
+        max_pages: Optional[int] = None,
+        page_range: Optional[str] = None,
+        paginate: bool = False,
+    ) -> dict:
+        """
+        Submit a PDF file to the Datalab Marker API.
+
+        Returns the JSON response containing ``request_id`` and
+        ``request_check_url``.
+        """
+        if not self.api_key:
+            raise RuntimeError(
+                "DATALAB_API_KEY is not configured. "
+                "Set the DATALAB_API_KEY environment variable or add it to .env"
+            )
+
+        data: Dict[str, str] = {
+            "output_format": output_format,
+            "mode": mode,
+            "disable_image_extraction": str(not extract_images).lower(),
+            "paginate": str(paginate).lower(),
+        }
+        if max_pages is not None:
+            data["max_pages"] = str(max_pages)
+        if page_range is not None:
+            data["page_range"] = page_range
+
+        filename = Path(file_path).name
+        headers = self._build_headers()
+        
+        # Debug logging (mask the API key for security)
+        masked_key = f"{self.api_key[:8]}...{self.api_key[-4:]}" if len(self.api_key) > 12 else "***"
+        logger.info(
+            "Submitting to Datalab API: url=%s, api_key=%s, file=%s",
+            self.api_url,
+            masked_key,
+            filename,
+        )
+        
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            with open(file_path, "rb") as f:
+                response = await client.post(
+                    self.api_url,
+                    headers=headers,
+                    files={"file": (filename, f, "application/pdf")},
+                    data=data,
+                )
+
+        # Enhanced error handling with response details
+        if response.status_code != 200:
+            error_details = f"Status: {response.status_code}, Response: {response.text[:500]}"
+            logger.error("Datalab API error: %s", error_details)
+            raise RuntimeError(
+                f"Datalab API returned {response.status_code}: {response.text[:200]}"
+            )
+
+        result = response.json()
+
+        if not result.get("success", False):
+            error_msg = result.get("error", "Unknown error from Datalab API")
+            raise RuntimeError(f"Datalab submission failed: {error_msg}")
+
+        logger.info(
+            "Submitted PDF to Datalab: request_id=%s", result.get("request_id")
+        )
+        return result
+
+    async def _poll_result(self, check_url: str) -> dict:
+        """
+        Poll the Datalab result endpoint until the job is complete or fails.
+
+        Returns the full result dictionary.
+        """
+        headers = self._build_headers()
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            for attempt in range(1, MAX_POLL_ATTEMPTS + 1):
+                response = await client.get(check_url, headers=headers)
+                response.raise_for_status()
+                result = response.json()
+
+                status = result.get("status", "")
+                if status == "complete":
+                    logger.info(
+                        "Datalab conversion complete (attempt %d/%d)",
+                        attempt,
+                        MAX_POLL_ATTEMPTS,
+                    )
+                    return result
+                elif status == "failed":
+                    error_msg = result.get("error", "Unknown error")
+                    raise RuntimeError(
+                        f"Datalab conversion failed: {error_msg}"
+                    )
+
+                # Still processing -- wait and retry
+                await asyncio.sleep(POLL_INTERVAL_SECONDS)
+
+        raise TimeoutError(
+            f"Datalab conversion timed out after "
+            f"{MAX_POLL_ATTEMPTS * POLL_INTERVAL_SECONDS}s"
+        )
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
     async def parse_pdf(
         self,
         file_path: str,
         extract_images: bool = True,
+        mode: str = DEFAULT_MODE,
+        output_format: str = DEFAULT_OUTPUT_FORMAT,
+        max_pages: Optional[int] = None,
+        page_range: Optional[str] = None,
+        paginate: bool = False,
     ) -> Tuple[str, List[dict]]:
         """
-        Parse PDF file and extract content as Markdown.
+        Parse a PDF file and return its content as Markdown (or other format).
 
         Args:
-            file_path: Path to the PDF file
-            extract_images: Whether to extract images from PDF
+            file_path: Path to the PDF file.
+            extract_images: Whether to extract images from the PDF.
+            mode: Processing mode -- "fast", "balanced", or "accurate".
+            output_format: Output format -- "markdown", "html", "json", "chunks".
+            max_pages: Maximum number of pages to process.
+            page_range: Specific pages, e.g. "0-5,10".
+            paginate: Whether to add page delimiters.
 
         Returns:
-            Tuple of (markdown_content, images_list)
-
-        TODO: Implement actual PDF parsing using third-party API
+            Tuple of (content_string, images_list).
+            ``images_list`` contains dicts with keys:
+                - filename (str)
+                - data (bytes) -- raw image bytes
+                - base64 (str) -- base64-encoded string
         """
-        # TODO: Third-party API integration
-        #
-        # Example implementation flow:
-        # 1. Read PDF file
-        # 2. Call third-party API (Adobe/Cloudmersive/etc)
-        # 3. Parse response to extract Markdown
-        # 4. Extract images if requested
-        # 5. Return Markdown content and image metadata
+        # Step 1: Submit
+        submit_result = await self._submit_file(
+            file_path=file_path,
+            output_format=output_format,
+            mode=mode,
+            extract_images=extract_images,
+            max_pages=max_pages,
+            page_range=page_range,
+            paginate=paginate,
+        )
 
-        # Placeholder implementation
-        file_name = Path(file_path).stem
-        markdown_content = self._get_placeholder_markdown(file_name)
+        check_url = submit_result["request_check_url"]
 
-        images = []
-        if extract_images:
-            # TODO: Extract images from PDF
-            images = [
-                {
-                    "page": 1,
-                    "index": 0,
-                    "type": "image",
-                    "format": "png",
-                    "width": 800,
-                    "height": 600,
-                    "note": "Placeholder - image extraction not implemented",
-                }
-            ]
+        # Step 2: Poll
+        result = await self._poll_result(check_url)
 
-        logger.info(f"Parsed PDF: {file_path} -> {len(markdown_content)} chars")
-        return markdown_content, images
+        # Step 3: Extract content
+        content = result.get(output_format, result.get("markdown", ""))
+
+        # Step 4: Extract images
+        images: List[dict] = []
+        raw_images: Dict[str, str] = result.get("images", {})
+        if raw_images and extract_images:
+            for img_filename, img_b64 in raw_images.items():
+                try:
+                    img_bytes = base64.b64decode(img_b64)
+                    images.append(
+                        {
+                            "filename": img_filename,
+                            "data": img_bytes,
+                            "base64": img_b64,
+                            "size": len(img_bytes),
+                        }
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to decode image %s: %s", img_filename, exc
+                    )
+
+        # Log summary
+        page_count = result.get("page_count", "?")
+        quality = result.get("parse_quality_score", "?")
+        logger.info(
+            "Parsed PDF: %s -> %d chars, %d images, %s pages, quality=%s",
+            file_path,
+            len(content),
+            len(images),
+            page_count,
+            quality,
+        )
+
+        return content, images
 
     async def parse_pdf_from_bytes(
         self,
         file_bytes: bytes,
         filename: str,
         extract_images: bool = True,
+        mode: str = DEFAULT_MODE,
+        output_format: str = DEFAULT_OUTPUT_FORMAT,
+        max_pages: Optional[int] = None,
+        page_range: Optional[str] = None,
+        paginate: bool = False,
     ) -> Tuple[str, List[dict]]:
         """
-        Parse PDF from bytes data.
+        Parse PDF from raw bytes.
+
+        Saves to a temporary file, calls :meth:`parse_pdf`, then cleans up.
 
         Args:
-            file_bytes: PDF file content as bytes
-            filename: Original filename
-            extract_images: Whether to extract images
+            file_bytes: PDF content as bytes.
+            filename: Original filename.
+            extract_images: Whether to extract images.
+            mode: Processing mode.
+            output_format: Output format.
+            max_pages: Maximum pages to process.
+            page_range: Specific pages.
+            paginate: Add page delimiters.
 
         Returns:
-            Tuple of (markdown_content, images_list)
+            Tuple of (content_string, images_list).
         """
-        # Save to temp file and parse
         temp_path = os.path.join(self.temp_dir, filename)
         try:
             with open(temp_path, "wb") as f:
                 f.write(file_bytes)
 
-            return await self.parse_pdf(temp_path, extract_images)
+            return await self.parse_pdf(
+                file_path=temp_path,
+                extract_images=extract_images,
+                mode=mode,
+                output_format=output_format,
+                max_pages=max_pages,
+                page_range=page_range,
+                paginate=paginate,
+            )
         finally:
-            # Clean up temp file
             if os.path.exists(temp_path):
                 os.remove(temp_path)
 
-    def _get_placeholder_markdown(self, title: str) -> str:
-        """
-        Generate placeholder Markdown content.
-
-        TODO: Remove this when implementing actual PDF parsing.
-        """
-        return f"""# {title}
-
-> This is a placeholder for the parsed PDF content.
-> The PDF parsing feature will be implemented with a third-party API.
-
-## Overview
-
-This document would contain the actual content extracted from the PDF file.
-
-## Sections
-
-- Section 1: Introduction
-- Section 2: Main Content
-- Section 3: Conclusion
-
-## Notes
-
-Please integrate a PDF parsing service to enable this functionality.
-
-Recommended options:
-- **Adobe PDF Services API**: https://www.adobe.com/devnet-docs/acrobatetk/tools/PDFTools/
-- **Cloudmersive PDF API**: https://www.cloudmersive.com/pdf-api
-- **PyMuPDF (local)**: https://pymupdf.readthedocs.io/
-- **pdfplumber (local)**: https://github.com/jsvine/pdfplumber
-
----
-
-*Generated by PDFParseService (placeholder mode)*
-"""
-
-    async def extract_images_only(self, file_path: str) -> List[dict]:
-        """
-        Extract only images from PDF without text content.
-
-        Args:
-            file_path: Path to the PDF file
-
-        Returns:
-            List of image metadata dictionaries
-
-        TODO: Implement image extraction
-        """
-        # TODO: Implement image extraction
-        logger.warning(f"Image extraction not implemented for: {file_path}")
-        return []
-
-    async def get_pdf_page_count(self, file_path: str) -> int:
-        """
-        Get the number of pages in a PDF file.
-
-        Args:
-            file_path: Path to the PDF file
-
-        Returns:
-            Number of pages
-
-        TODO: Implement page count retrieval
-        """
-        # TODO: Implement page count
-        return 1
-
     async def get_pdf_metadata(self, file_path: str) -> dict:
         """
-        Get metadata from PDF file.
+        Get metadata from a PDF by running a fast conversion.
 
-        Args:
-            file_path: Path to the PDF file
-
-        Returns:
-            Dictionary with PDF metadata (title, author, created date, etc.)
-
-        TODO: Implement metadata extraction
+        Returns a dictionary with page_count, parse_quality_score, etc.
         """
+        submit_result = await self._submit_file(
+            file_path=file_path,
+            output_format="markdown",
+            mode="fast",
+            extract_images=False,
+            max_pages=1,
+        )
+        result = await self._poll_result(submit_result["request_check_url"])
+
         return {
             "title": Path(file_path).stem,
-            "author": None,
-            "subject": None,
-            "keywords": None,
-            "creator": None,
-            "producer": None,
-            "created": None,
-            "modified": None,
-            "page_count": await self.get_pdf_page_count(file_path),
+            "page_count": result.get("page_count"),
+            "parse_quality_score": result.get("parse_quality_score"),
+            "metadata": result.get("metadata", {}),
+            "cost_breakdown": result.get("cost_breakdown", {}),
         }
 
 

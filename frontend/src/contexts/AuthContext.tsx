@@ -25,23 +25,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
-  // Load auth state from localStorage on mount
+  // Load auth state from localStorage on mount and validate token
   useEffect(() => {
-    const storedToken = localStorage.getItem('access_token')
-    const storedUser = localStorage.getItem('user')
+    const validateToken = async () => {
+      const storedToken = localStorage.getItem('access_token')
+      const storedUser = localStorage.getItem('user')
 
-    if (storedToken && storedUser) {
-      try {
-        setToken(storedToken)
-        setUser(JSON.parse(storedUser))
-      } catch (error) {
-        console.error('Failed to parse stored user data:', error)
-        localStorage.removeItem('access_token')
-        localStorage.removeItem('user')
+      if (storedToken && storedUser) {
+        try {
+          // Validate token by calling /auth/me endpoint
+          const response = await fetch('http://localhost:8000/api/v1/auth/me', {
+            headers: {
+              'Authorization': `Bearer ${storedToken}`,
+              'Content-Type': 'application/json',
+            },
+          })
+
+          if (response.ok) {
+            // Token is valid, restore user data
+            setToken(storedToken)
+            setUser(JSON.parse(storedUser))
+          } else {
+            // Token is invalid or expired, clear stored data
+            console.error('Token validation failed:', response.status)
+            localStorage.removeItem('access_token')
+            localStorage.removeItem('user')
+          }
+        } catch (error) {
+          // Network error or server unavailable, clear stored data
+          console.error('Token validation error:', error)
+          localStorage.removeItem('access_token')
+          localStorage.removeItem('user')
+        }
       }
+
+      setIsLoading(false)
     }
 
-    setIsLoading(false)
+    validateToken()
   }, [])
 
   const login = (newToken: string, newUser: User) => {

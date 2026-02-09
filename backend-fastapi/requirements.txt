@@ -22,6 +22,3 @@ langgraph>=0.2.0
 # PDF parsing and format conversion
 markdown-it-py>=3.0.0
 mdit-py-plugins>=0.4.0
-# Optional: Local PDF parsing libraries (uncomment when needed)
-# PyMuPDF>=1.23.0
-# pdfplumber>=0.10.0

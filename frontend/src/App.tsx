@@ -10,12 +10,12 @@ import DocumentsPage from './pages/DocumentsPage'
 import DocumentEditorPage from './pages/DocumentEditorPage'
 import ProfilePage from './pages/ProfilePage'
 
-// Particle component for background effect
+// Particle component for background effect - optimized
 function Particles() {
   const [particles, setParticles] = useState<number[]>([])
 
   useEffect(() => {
-    const count = 20
+    const count = 15 // Reduced from 20 for better performance
     setParticles(Array.from({ length: count }, (_, i) => i))
   }, [])
 
@@ -27,8 +27,8 @@ function Particles() {
           className="particle"
           style={{
             left: `${Math.random() * 100}%`,
-            animationDelay: `${Math.random() * 15}s`,
-            animationDuration: `${10 + Math.random() * 10}s`
+            animationDelay: `${Math.random() * 20}s`,
+            animationDuration: `${20 + Math.random() * 15}s` // Slower, varied speeds
           }}
         />
       ))}
@@ -38,72 +38,186 @@ function Particles() {
 
 function Navbar() {
   const { user, isAuthenticated, logout } = useAuth()
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
   return (
-    <nav className="backdrop-blur-md bg-opacity-80 shadow-lg border-b border-cyan-500/30"
-         style={{ background: 'rgba(10, 10, 15, 0.8)' }}>
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16">
-          <div className="flex items-center">
-            <Link to="/" className="text-2xl font-bold tracking-wider neon-text float-animation">
-              &lt;SMART CODE&gt;
+    <nav className="backdrop-blur-md bg-opacity-80 shadow-lg border-b border-cyan-500/30 relative z-50"
+         style={{ background: 'rgba(10, 10, 15, 0.9)' }}>
+      <div className="w-full px-3 sm:px-4 lg:px-6">
+        <div className="flex items-center justify-between h-14 sm:h-16">
+          {/* Logo */}
+          <div className="flex-shrink-0">
+            <Link to="/" className="text-lg sm:text-2xl font-bold tracking-wider neon-text float-animation">
+              &lt;SC&gt;
             </Link>
           </div>
-          <div className="hidden md:block">
-            <div className="ml-10 flex items-center space-x-2">
-              <Link to="/" className="cyber-btn text-sm">
+
+          {/* Desktop Navigation - Scrollable on medium screens */}
+          <div className="hidden lg:flex flex-1 items-center justify-center px-4">
+            <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-thin">
+              <Link to="/" className="cyber-btn text-xs px-2 py-1.5 whitespace-nowrap">
                 Home
               </Link>
-              <Link to="/projects" className="cyber-btn text-sm">
+              <Link to="/projects" className="cyber-btn text-xs px-2 py-1.5 whitespace-nowrap">
                 Projects
               </Link>
-              <Link to="/documents" className="cyber-btn text-sm" style={{ borderColor: 'var(--color-neon-purple)', color: 'var(--color-neon-purple)' }}>
-                Documents
+              <Link to="/documents" className="cyber-btn text-xs px-2 py-1.5 whitespace-nowrap" style={{ borderColor: 'var(--color-neon-purple)', color: 'var(--color-neon-purple)' }}>
+                Docs
               </Link>
-              <Link to="/editor" className="cyber-btn text-sm">
+              <Link to="/editor" className="cyber-btn text-xs px-2 py-1.5 whitespace-nowrap">
                 Editor
               </Link>
-              <Link to="/generate" className="cyber-btn text-sm">
+              <Link to="/generate" className="cyber-btn text-xs px-2 py-1.5 whitespace-nowrap">
                 Generate
               </Link>
-              <Link to="/review" className="cyber-btn text-sm">
+              <Link to="/review" className="cyber-btn text-xs px-2 py-1.5 whitespace-nowrap">
                 Review
               </Link>
-
-              {isAuthenticated ? (
-                <>
-                  <Link to="/profile" className="cyber-btn text-sm" style={{ borderColor: 'var(--color-neon-green)', color: 'var(--color-neon-green)' }}>
-                    Profile
-                  </Link>
-                  <span className="text-sm text-cyan-300 ml-4 px-4 py-2 border border-cyan-500/30 rounded">
-                    Welcome, {user?.username}
-                  </span>
-                  <button
-                    onClick={logout}
-                    className="cyber-btn text-sm"
-                    style={{ borderColor: 'var(--color-neon-pink)', color: 'var(--color-neon-pink)' }}
-                  >
-                    Logout
-                  </button>
-                </>
-              ) : (
-                <>
-                  <Link to="/login" className="cyber-btn text-sm">
-                    Login
-                  </Link>
-                  <Link
-                    to="/register"
-                    className="cyber-btn text-sm"
-                    style={{ borderColor: 'var(--color-neon-green)', color: 'var(--color-neon-green)' }}
-                  >
-                    Register
-                  </Link>
-                </>
-              )}
             </div>
+          </div>
+
+          {/* User Actions */}
+          <div className="hidden lg:flex items-center gap-1.5">
+            {isAuthenticated ? (
+              <>
+                <Link to="/profile" className="cyber-btn text-xs px-2 py-1.5 whitespace-nowrap" style={{ borderColor: 'var(--color-neon-green)', color: 'var(--color-neon-green)' }}>
+                  Profile
+                </Link>
+                <button
+                  onClick={logout}
+                  className="cyber-btn text-xs px-2 py-1.5 whitespace-nowrap"
+                  style={{ borderColor: 'var(--color-neon-pink)', color: 'var(--color-neon-pink)' }}
+                >
+                  Logout
+                </button>
+                <span className="text-xs text-cyan-300 px-2 py-1.5 border border-cyan-500/30 rounded whitespace-nowrap max-w-24 truncate">
+                  {user?.username}
+                </span>
+              </>
+            ) : (
+              <>
+                <Link to="/login" className="cyber-btn text-xs px-3 py-1.5">
+                  Login
+                </Link>
+                <Link
+                  to="/register"
+                  className="cyber-btn text-xs px-3 py-1.5"
+                  style={{ borderColor: 'var(--color-neon-green)', color: 'var(--color-neon-green)' }}
+                >
+                  Register
+                </Link>
+              </>
+            )}
+          </div>
+
+          {/* Mobile menu button */}
+          <div className="lg:hidden flex items-center gap-2">
+            {isAuthenticated && (
+              <span className="text-xs text-cyan-300 px-2 py-1 border border-cyan-500/30 rounded max-w-20 truncate">
+                {user?.username}
+              </span>
+            )}
+            <button
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              className="cyber-btn text-xs px-2 py-1.5"
+            >
+              {mobileMenuOpen ? '✕' : '☰'}
+            </button>
           </div>
         </div>
       </div>
+
+      {/* Mobile Menu */}
+      {mobileMenuOpen && (
+        <div className="lg:hidden" style={{ background: 'rgba(10, 10, 15, 0.98)' }}>
+          <div className="px-3 pt-2 pb-4 space-y-1">
+            <Link
+              to="/"
+              className="block cyber-btn text-xs px-3 py-2 w-full text-left"
+              onClick={() => setMobileMenuOpen(false)}
+            >
+              Home
+            </Link>
+            <Link
+              to="/projects"
+              className="block cyber-btn text-xs px-3 py-2 w-full text-left"
+              onClick={() => setMobileMenuOpen(false)}
+            >
+              Projects
+            </Link>
+            <Link
+              to="/documents"
+              className="block cyber-btn text-xs px-3 py-2 w-full text-left"
+              style={{ borderColor: 'var(--color-neon-purple)', color: 'var(--color-neon-purple)' }}
+              onClick={() => setMobileMenuOpen(false)}
+            >
+              Documents
+            </Link>
+            <Link
+              to="/editor"
+              className="block cyber-btn text-xs px-3 py-2 w-full text-left"
+              onClick={() => setMobileMenuOpen(false)}
+            >
+              Editor
+            </Link>
+            <Link
+              to="/generate"
+              className="block cyber-btn text-xs px-3 py-2 w-full text-left"
+              onClick={() => setMobileMenuOpen(false)}
+            >
+              Generate
+            </Link>
+            <Link
+              to="/review"
+              className="block cyber-btn text-xs px-3 py-2 w-full text-left"
+              onClick={() => setMobileMenuOpen(false)}
+            >
+              Review
+            </Link>
+            {isAuthenticated && (
+              <>
+                <Link
+                  to="/profile"
+                  className="block cyber-btn text-xs px-3 py-2 w-full text-left"
+                  style={{ borderColor: 'var(--color-neon-green)', color: 'var(--color-neon-green)' }}
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  Profile
+                </Link>
+                <button
+                  onClick={() => {
+                    logout()
+                    setMobileMenuOpen(false)
+                  }}
+                  className="block cyber-btn text-xs px-3 py-2 w-full text-left"
+                  style={{ borderColor: 'var(--color-neon-pink)', color: 'var(--color-neon-pink)' }}
+                >
+                  Logout
+                </button>
+              </>
+            )}
+            {!isAuthenticated && (
+              <>
+                <Link
+                  to="/login"
+                  className="block cyber-btn text-xs px-3 py-2 w-full text-left"
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  Login
+                </Link>
+                <Link
+                  to="/register"
+                  className="block cyber-btn text-xs px-3 py-2 w-full text-left"
+                  style={{ borderColor: 'var(--color-neon-green)', color: 'var(--color-neon-green)' }}
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  Register
+                </Link>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </nav>
   )
 }

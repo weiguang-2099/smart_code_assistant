@@ -12,6 +12,7 @@ export default function PDFUploader({ token, onClose, onComplete, onError }: PDF
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress] = useState(0)
+  const [statusText, setStatusText] = useState('')
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [category, setCategory] = useState('')
@@ -64,13 +65,27 @@ export default function PDFUploader({ token, onClose, onComplete, onError }: PDF
 
     setUploading(true)
     setProgress(0)
-
-    // Simulate progress
-    const progressInterval = setInterval(() => {
-      setProgress((prev) => Math.min(prev + 10, 90))
-    }, 200)
+    setStatusText('Uploading file...')
 
     try {
+      // Step 1: Uploading
+      setStatusText('Uploading PDF to server...')
+      setProgress(5)
+      await new Promise(resolve => setTimeout(resolve, 300))
+      
+      // Step 2: Start parsing (show realistic progress)
+      setStatusText('Parsing PDF with Datalab Marker API...')
+      setProgress(10)
+      
+      // Update progress slowly while waiting for API
+      let currentProgress = 10
+      const progressInterval = setInterval(() => {
+        // Slow exponential progress: 10 -> 15 -> 20 -> 25 -> ... -> 75 (stops)
+        currentProgress = Math.min(currentProgress + (80 - currentProgress) * 0.05, 75)
+        setProgress(Math.floor(currentProgress))
+      }, 1500) // Update every 1.5 seconds
+
+      // This is where the actual API call happens (10-30+ seconds)
       const result = await documentService.uploadPDF(
         token,
         file,
@@ -81,16 +96,27 @@ export default function PDFUploader({ token, onClose, onComplete, onError }: PDF
         }
       )
 
+      // Step 3: API returned! Stop progress simulation
       clearInterval(progressInterval)
-      setProgress(100)
+      setProgress(85)
+      setStatusText('Processing document...')
+      await new Promise(resolve => setTimeout(resolve, 300))
 
-      // Note: The current API returns document_id: 0 in placeholder mode
-      // In production, it would return the actual document ID
+      // Step 4: Converting
+      setProgress(95)
+      setStatusText('Creating document...')
+      await new Promise(resolve => setTimeout(resolve, 200))
+
+      // Step 5: Complete
+      setProgress(100)
+      setStatusText('Complete!')
+
+      // Document created successfully with actual ID
       setTimeout(() => {
         onComplete(result.document_id)
       }, 500)
     } catch (err) {
-      clearInterval(progressInterval)
+      setStatusText('')
       onError(err instanceof Error ? err.message : 'Failed to upload PDF')
     } finally {
       setUploading(false)
@@ -224,17 +250,21 @@ export default function PDFUploader({ token, onClose, onComplete, onError }: PDF
           {uploading && (
             <div className="space-y-2">
               <div className="flex justify-between text-sm">
-                <span className="text-purple-300">Parsing PDF...</span>
+                <span className="text-purple-300">{statusText}</span>
                 <span className="text-gray-400">{progress}%</span>
               </div>
               <div className="w-full h-2 bg-gray-800 rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-gradient-to-r from-purple-500 to-cyan-500 transition-all duration-300"
+                  className="h-full bg-gradient-to-r from-purple-500 to-cyan-500 transition-all duration-1000"
                   style={{ width: `${progress}%` }}
                 />
               </div>
               <p className="text-xs text-gray-500 text-center">
-                PDF parsing is currently in placeholder mode. The content will be placeholder text.
+                {progress < 85 
+                  ? 'This may take 10-30 seconds depending on PDF size and complexity...'
+                  : progress < 100
+                  ? 'Almost done...'
+                  : 'Complete!'}
               </p>
             </div>
           )}

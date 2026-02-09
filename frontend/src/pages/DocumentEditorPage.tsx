@@ -2,13 +2,12 @@ import { useEffect, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { DocumentProvider, useDocument } from '../contexts/DocumentContext'
-import TipTapEditor from '../components/TipTapEditor'
+import MarkdownEditor from '../components/MarkdownEditor'
 import VersionHistory from '../components/VersionHistory'
 import VersionDiff from '../components/VersionDiff'
-import { markdownToTipTap, tipTapToMarkdown } from '../utils/formatConverter'
 
 function DocumentEditorContent() {
-  const { documentId } = useParams<{ documentId: string }>()
+  const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { token } = useAuth()
   const {
@@ -36,22 +35,40 @@ function DocumentEditorContent() {
   const [showVersionHistory, setShowVersionHistory] = useState(false)
   const [saveSummary, setSaveSummary] = useState('')
   const [showSaveSummary, setShowSaveSummary] = useState(false)
+  const [markdownContent, setMarkdownContent] = useState('')
+  const [hasChanges, setHasChanges] = useState(false)
 
   // Load document on mount
   useEffect(() => {
-    if (documentId && token) {
-      loadDocument(parseInt(documentId))
+    if (id && token) {
+      loadDocument(parseInt(id))
     }
 
     return () => {
       clearDocument()
     }
-  }, [documentId, token])
+  }, [id, token])
+
+  // Load markdown content when document changes
+  useEffect(() => {
+    console.log('Document changed:', document)
+    console.log('Current version:', document?.current_version)
+    console.log('Markdown content:', document?.current_version?.markdown_content)
+    
+    if (document?.current_version?.markdown_content) {
+      const md = document.current_version.markdown_content
+      console.log('Setting markdown content, length:', md.length)
+      setMarkdownContent(md)
+      setHasChanges(false)
+    } else {
+      console.log('No markdown content found in document')
+    }
+  }, [document])
 
   // Warn before leaving with unsaved changes
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (hasUnsavedChanges) {
+      if (hasChanges) {
         e.preventDefault()
         e.returnValue = ''
       }
@@ -59,23 +76,26 @@ function DocumentEditorContent() {
 
     window.addEventListener('beforeunload', handleBeforeUnload)
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
-  }, [hasUnsavedChanges])
+  }, [hasChanges])
 
   const handleSave = async () => {
-    if (!currentContent) return
+    if (!markdownContent) return
 
     try {
-      const markdown = tipTapToMarkdown(currentContent)
-      await saveContent(markdown, currentContent, saveSummary || undefined)
+      // Generate TipTap content from markdown (for future use)
+      const tiptapContent = { type: 'doc', content: [] }
+      await saveContent(markdownContent, tiptapContent, saveSummary || undefined)
       setShowSaveSummary(false)
       setSaveSummary('')
+      setHasChanges(false)
     } catch (err) {
       // Error is handled by context
     }
   }
 
-  const handleContentChange = (tiptap: any, markdown: string) => {
-    setCurrentContent(tiptap)
+  const handleContentChange = (markdown: string) => {
+    setMarkdownContent(markdown)
+    setHasChanges(markdown !== document?.current_version?.markdown_content)
   }
 
   if (loading) {
@@ -136,7 +156,7 @@ function DocumentEditorContent() {
                       Viewing version {viewingVersionId}
                     </span>
                   )}
-                  {hasUnsavedChanges && (
+                  {hasChanges && (
                     <span className="text-orange-400">Unsaved changes</span>
                   )}
                 </div>
@@ -153,6 +173,23 @@ function DocumentEditorContent() {
               </button>
 
               <button
+                onClick={() => {
+                  if (!document?.current_version?.markdown_content) return
+                  const blob = new Blob([document.current_version.markdown_content], { type: 'text/markdown' })
+                  const url = URL.createObjectURL(blob)
+                  const a = document.createElement('a')
+                  a.href = url
+                  a.download = `${document.title}.md`
+                  a.click()
+                  URL.revokeObjectURL(url)
+                }}
+                className="cyber-btn px-4 py-2 text-sm"
+                title="Download as Markdown"
+              >
+                ⬇ Download MD
+              </button>
+
+              <button
                 onClick={() => setShowMetadataModal(true)}
                 className="cyber-btn px-4 py-2 text-sm"
                 title="Edit document metadata"
@@ -162,14 +199,14 @@ function DocumentEditorContent() {
 
               <button
                 onClick={() => setShowSaveSummary(true)}
-                disabled={!hasUnsavedChanges}
+                disabled={!hasChanges}
                 className="cyber-btn px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{
-                  borderColor: hasUnsavedChanges ? 'var(--color-neon-green)' : undefined,
-                  color: hasUnsavedChanges ? 'var(--color-neon-green)' : undefined,
+                  borderColor: hasChanges ? 'var(--color-neon-green)' : undefined,
+                  color: hasChanges ? 'var(--color-neon-green)' : undefined,
                 }}
               >
-                {hasUnsavedChanges ? '💾 Save Changes' : 'Saved'}
+                {hasChanges ? '💾 Save Changes' : 'Saved'}
               </button>
             </div>
           </div>
@@ -188,9 +225,9 @@ function DocumentEditorContent() {
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
             {/* Main Editor */}
             <div className="lg:col-span-3">
-              <TipTapEditor
-                content={currentContent || { type: 'doc', content: [] }}
-                placeholder="Start writing your document..."
+              <MarkdownEditor
+                content={markdownContent}
+                placeholder="Start writing your document in Markdown..."
                 editable={true}
                 onChange={handleContentChange}
               />

@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     # ZhipuAI Configuration
     ZHIPUAI_API_KEY: str = ""
 
+    # Datalab (Marker) API Configuration
+    DATALAB_API_KEY: str = ""
+    DATALAB_API_URL: str = "https://www.datalab.to/api/v1/marker"
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
