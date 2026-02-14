@@ -93,6 +93,22 @@ class UserStatsResponse(BaseModel):
     storage_used: int  # in bytes
 
 
+class EnhancedUserStatsResponse(BaseModel):
+    """Schema for enhanced user statistics response with agent data."""
+    # Document stats
+    documents_count: int
+    total_versions: int
+    projects_count: int
+    storage_used: int  # in bytes
+    # Agent stats
+    agents_count: int
+    total_conversations: int
+    total_training_tasks: int
+    # User info
+    last_login_at: Optional[datetime] = None
+    member_since: datetime
+
+
 # ==================== Full User Profile Schemas ====================
 
 class FullUserProfileResponse(BaseModel):

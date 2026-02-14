@@ -8,6 +8,7 @@ import type {
   UserPreference,
   UserPreferenceUpdate,
   UserStats,
+  EnhancedUserStats,
   FullUserProfile,
   AvatarUploadResponse,
 } from '../types/user'
@@ -127,6 +128,17 @@ export async function getUserStats(token: string): Promise<UserStats> {
   return handleResponse<UserStats>(response)
 }
 
+/**
+ * Get current user's enhanced statistics (including agent data)
+ */
+export async function getEnhancedUserStats(token: string): Promise<EnhancedUserStats> {
+  const response = await fetch(`${API_URL}/api/v1/user/stats/enhanced`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+
+  return handleResponse<EnhancedUserStats>(response)
+}
+
 // ==================== Full Profile API ====================
 
 /**
@@ -154,6 +166,7 @@ export const userService = {
 
   // Stats
   getUserStats,
+  getEnhancedUserStats,
 
   // Full profile
   getFullUserProfile,

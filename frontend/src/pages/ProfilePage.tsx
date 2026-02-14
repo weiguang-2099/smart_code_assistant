@@ -3,8 +3,11 @@ import { useAuth } from '../contexts/AuthContext'
 import BasicInfoTab from '../components/BasicInfoTab'
 import ContentManagementTab from '../components/ContentManagementTab'
 import PreferencesTab from '../components/PreferencesTab'
+import MyAgentsTab from '../components/MyAgentsTab'
+import TrainingTab from '../components/TrainingTab'
+import ConversationsTab from '../components/ConversationsTab'
 
-type TabType = 'basic' | 'content' | 'preferences'
+type TabType = 'basic' | 'agents' | 'training' | 'conversations' | 'preferences'
 
 export default function ProfilePage() {
   const { isAuthenticated, token } = useAuth()
@@ -12,7 +15,9 @@ export default function ProfilePage() {
 
   const tabs = [
     { id: 'basic' as TabType, label: 'Basic Info', icon: '👤' },
-    { id: 'content' as TabType, label: 'Content', icon: '📁' },
+    { id: 'agents' as TabType, label: 'My Agents', icon: '🤖' },
+    { id: 'training' as TabType, label: 'Training', icon: '🎓' },
+    { id: 'conversations' as TabType, label: 'Conversations', icon: '💬' },
     { id: 'preferences' as TabType, label: 'Preferences', icon: '⚙' },
   ]
 
@@ -77,7 +82,9 @@ export default function ProfilePage() {
             {/* Tab Content */}
             <div className="p-6">
               {activeTab === 'basic' && <BasicInfoTab token={token} />}
-              {activeTab === 'content' && <ContentManagementTab token={token} />}
+              {activeTab === 'agents' && <MyAgentsTab token={token} />}
+              {activeTab === 'training' && <TrainingTab token={token} />}
+              {activeTab === 'conversations' && <ConversationsTab token={token} />}
               {activeTab === 'preferences' && <PreferencesTab token={token} />}
             </div>
           </div>

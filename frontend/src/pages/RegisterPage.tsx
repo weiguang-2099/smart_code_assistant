@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
+import { useToast } from '../contexts/ToastContext'
 
 interface RegisterResponse {
   id: number
@@ -12,12 +13,14 @@ interface RegisterResponse {
   created_at: string
   updated_at: string
   access_token: string
+  refresh_token?: string
   token_type: string
 }
 
 export default function RegisterPage() {
   const navigate = useNavigate()
   const { login } = useAuth()
+  const toast = useToast()
   const [formData, setFormData] = useState({
     username: '',
     email: '',
@@ -44,13 +47,17 @@ export default function RegisterPage() {
 
     // Validate passwords match
     if (formData.password !== formData.confirmPassword) {
-      setError('Passwords do not match')
+      const errorMsg = 'Passwords do not match'
+      setError(errorMsg)
+      toast.error(errorMsg)
       return
     }
 
     // Validate password length
     if (formData.password.length < 6) {
-      setError('Password must be at least 6 characters')
+      const errorMsg = 'Password must be at least 6 characters'
+      setError(errorMsg)
+      toast.error(errorMsg)
       return
     }
 
@@ -68,32 +75,41 @@ export default function RegisterPage() {
         body: JSON.stringify(registerData),
       })
 
-      const data: RegisterResponse = await response.json()
+      const data = await response.json()
 
       if (!response.ok) {
-        throw new Error(data.detail || 'Registration failed')
+        // Handle new error format
+        const errorMessage = data.error?.message || data.detail || 'Registration failed'
+        throw new Error(errorMessage)
       }
+
+      const registerData_: RegisterResponse = data
 
       // Store token and user info using AuthContext
       const userData = {
-        id: data.id,
-        username: data.username,
-        email: data.email,
-        full_name: data.full_name,
-        is_active: data.is_active,
-        is_superuser: data.is_superuser,
+        id: registerData_.id,
+        username: registerData_.username,
+        email: registerData_.email,
+        full_name: registerData_.full_name,
+        is_active: registerData_.is_active,
+        is_superuser: registerData_.is_superuser,
       }
-      login(data.access_token, userData)
+
+      // Use refresh_token if available, otherwise empty string
+      login(registerData_.access_token, registerData_.refresh_token || '', userData)
 
       // Show success message
       setSuccess(true)
+      toast.success(`Welcome, ${registerData_.username}! Your identity has been initialized.`)
 
       // Navigate to home after delay
       setTimeout(() => {
         navigate('/')
       }, 2000)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred')
+      const errorMessage = err instanceof Error ? err.message : 'An error occurred'
+      setError(errorMessage)
+      toast.error(errorMessage)
     } finally {
       setLoading(false)
     }

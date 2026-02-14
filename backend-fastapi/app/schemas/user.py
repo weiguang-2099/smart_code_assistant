@@ -40,19 +40,37 @@ class UserResponse(UserBase):
     updated_at: datetime
 
 
-# Schema for user with token (after login/register)
-class UserWithToken(UserResponse):
-    """Schema for user response with access token."""
-    access_token: str
-    token_type: str = "bearer"
-
-
-# Schema for token response
+# Schema for token response (with refresh token)
 class Token(BaseModel):
-    """Schema for token response."""
+    """Schema for token response with refresh token support."""
     access_token: str
+    refresh_token: str
     token_type: str = "bearer"
+    expires_in: int  # Access token expiration in seconds
     user: UserResponse
+
+
+# Schema for refresh token request
+class RefreshTokenRequest(BaseModel):
+    """Schema for refresh token request."""
+    refresh_token: str = Field(..., description="Refresh token")
+
+
+# Schema for token refresh response
+class TokenRefreshResponse(BaseModel):
+    """Schema for token refresh response."""
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    expires_in: int
+
+
+# Schema for user with token (after register - for backward compatibility)
+class UserWithToken(UserResponse):
+    """Schema for user response with access token (backward compatibility)."""
+    access_token: str
+    refresh_token: Optional[str] = None
+    token_type: str = "bearer"
 
 
 # Schema for token data (internal use)

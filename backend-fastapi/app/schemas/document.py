@@ -24,6 +24,26 @@ class DocumentBase(BaseModel):
     project_id: Optional[int] = Field(None, description="Associated project ID")
 
 
+# ==================== Outline Schemas ====================
+
+class OutlineItem(BaseModel):
+    """Schema for document outline item (heading)."""
+    level: int = Field(..., ge=1, le=6, description="Heading level (1-6)")
+    text: str = Field(..., description="Heading text")
+    anchor: str = Field(..., description="Anchor ID for navigation")
+    line_number: Optional[int] = Field(None, description="Line number in the document")
+    children: List["OutlineItem"] = Field(default_factory=list, description="Child headings")
+
+
+OutlineItem.model_rebuild()  # Allow self-referencing
+
+
+class DocumentOutlineResponse(BaseModel):
+    """Schema for document outline response."""
+    document_id: int
+    outline: List[OutlineItem]
+
+
 class DocumentCreate(DocumentBase):
     """Schema for creating a new document."""
     pass
@@ -42,6 +62,7 @@ class DocumentResponse(DocumentBase):
 
     id: int
     user_id: int
+    document_number: Optional[str] = None
     current_version_id: Optional[int] = None
     is_published: bool
     version_count: int = 0

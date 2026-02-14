@@ -1,5 +1,7 @@
 import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
+import { ToastProvider } from './contexts/ToastContext'
+import ErrorBoundary from './components/ErrorBoundary'
 import { useEffect, useState } from 'react'
 import EditorPage from './pages/EditorPage'
 import ProjectsPage from './pages/ProjectsPage'
@@ -9,6 +11,7 @@ import RegisterPage from './pages/RegisterPage'
 import DocumentsPage from './pages/DocumentsPage'
 import DocumentEditorPage from './pages/DocumentEditorPage'
 import ProfilePage from './pages/ProfilePage'
+import AgentsPage from './pages/AgentsPage'
 
 // Particle component for background effect - optimized
 function Particles() {
@@ -63,6 +66,9 @@ function Navbar() {
               </Link>
               <Link to="/documents" className="cyber-btn text-xs px-2 py-1.5 whitespace-nowrap" style={{ borderColor: 'var(--color-neon-purple)', color: 'var(--color-neon-purple)' }}>
                 Docs
+              </Link>
+              <Link to="/agents" className="cyber-btn text-xs px-2 py-1.5 whitespace-nowrap" style={{ borderColor: 'var(--color-neon-pink)', color: 'var(--color-neon-pink)' }}>
+                Agents
               </Link>
               <Link to="/editor" className="cyber-btn text-xs px-2 py-1.5 whitespace-nowrap">
                 Editor
@@ -152,6 +158,14 @@ function Navbar() {
               onClick={() => setMobileMenuOpen(false)}
             >
               Documents
+            </Link>
+            <Link
+              to="/agents"
+              className="block cyber-btn text-xs px-3 py-2 w-full text-left"
+              style={{ borderColor: 'var(--color-neon-pink)', color: 'var(--color-neon-pink)' }}
+              onClick={() => setMobileMenuOpen(false)}
+            >
+              Agents
             </Link>
             <Link
               to="/editor"
@@ -321,6 +335,7 @@ function AppContent() {
             <Route path="/documents" element={<DocumentsPage />} />
             <Route path="/documents/:id" element={<DocumentEditorPage />} />
             <Route path="/documents/:id/edit" element={<DocumentEditorPage />} />
+            <Route path="/agents" element={<AgentsPage />} />
             <Route path="/profile" element={<ProfilePage />} />
             <Route path="/editor" element={<EditorPage />} />
             <Route path="/generate" element={<CodeGenPage />} />
@@ -336,11 +351,15 @@ function AppContent() {
 
 function App() {
   return (
-    <Router>
-      <AuthProvider>
-        <AppContent />
-      </AuthProvider>
-    </Router>
+    <ErrorBoundary>
+      <Router>
+        <AuthProvider>
+          <ToastProvider>
+            <AppContent />
+          </ToastProvider>
+        </AuthProvider>
+      </Router>
+    </ErrorBoundary>
   )
 }
 

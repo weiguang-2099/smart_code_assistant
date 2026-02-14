@@ -16,6 +16,7 @@ from app.schemas.user_profile import (
     UserPreferenceUpdate,
     UserPreferenceResponse,
     UserStatsResponse,
+    EnhancedUserStatsResponse,
     FullUserProfileResponse,
     AvatarUploadResponse,
 )
@@ -23,6 +24,7 @@ from app.models.user import User
 from app.models.user_profile import UserProfile, UserPreference
 from app.models.document import Document, RawVersion
 from app.models.project import Project
+from app.models.agent import Agent, Conversation, TrainingTask
 
 router = APIRouter()
 
@@ -445,4 +447,81 @@ async def get_full_user_profile(
             updated_at=preferences.updated_at,
         ),
         stats=stats,
+    )
+
+
+# ==================== Enhanced Stats Routes ====================
+
+@router.get("/stats/enhanced", response_model=EnhancedUserStatsResponse)
+async def get_enhanced_user_stats(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Get enhanced statistics for the current user including agent data.
+
+    Args:
+        current_user: Current authenticated user
+        db: Database session
+
+    Returns:
+        EnhancedUserStatsResponse: Enhanced user statistics with agent data
+    """
+    # Count documents
+    documents_count_result = await db.execute(
+        select(func.count()).select_from(Document).where(Document.user_id == current_user.id)
+    )
+    documents_count = documents_count_result.scalar() or 0
+
+    # Count total versions
+    total_versions_result = await db.execute(
+        select(func.count())
+        .select_from(RawVersion)
+        .join(Document, Document.id == RawVersion.document_id)
+        .where(Document.user_id == current_user.id)
+    )
+    total_versions = total_versions_result.scalar() or 0
+
+    # Count projects
+    projects_count_result = await db.execute(
+        select(func.count()).select_from(Project).where(Project.owner_id == current_user.id)
+    )
+    projects_count = projects_count_result.scalar() or 0
+
+    # Calculate storage used
+    storage_result = await db.execute(
+        select(func.sum(func.length(RawVersion.markdown_content)))
+        .join(Document, Document.id == RawVersion.document_id)
+        .where(Document.user_id == current_user.id)
+    )
+    storage_used = storage_result.scalar() or 0
+
+    # Count agents
+    agents_count_result = await db.execute(
+        select(func.count()).select_from(Agent).where(Agent.user_id == current_user.id)
+    )
+    agents_count = agents_count_result.scalar() or 0
+
+    # Count total conversations
+    conversations_count_result = await db.execute(
+        select(func.count()).select_from(Conversation).where(Conversation.user_id == current_user.id)
+    )
+    total_conversations = conversations_count_result.scalar() or 0
+
+    # Count training tasks
+    training_tasks_count_result = await db.execute(
+        select(func.count()).select_from(TrainingTask).where(TrainingTask.user_id == current_user.id)
+    )
+    total_training_tasks = training_tasks_count_result.scalar() or 0
+
+    return EnhancedUserStatsResponse(
+        documents_count=documents_count,
+        total_versions=total_versions,
+        projects_count=projects_count,
+        storage_used=storage_used,
+        agents_count=agents_count,
+        total_conversations=total_conversations,
+        total_training_tasks=total_training_tasks,
+        last_login_at=current_user.last_login_at,
+        member_since=current_user.created_at,
     )

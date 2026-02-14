@@ -1,10 +1,13 @@
 import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
+import { useToast } from '../contexts/ToastContext'
 
 interface LoginResponse {
   access_token: string
+  refresh_token: string
   token_type: string
+  expires_in: number
   user: {
     id: number
     username: string
@@ -15,9 +18,19 @@ interface LoginResponse {
   }
 }
 
+interface ErrorResponse {
+  success: boolean
+  error: {
+    code: string
+    message: string
+    details?: Record<string, unknown>
+  }
+}
+
 export default function LoginPage() {
   const navigate = useNavigate()
   const { login } = useAuth()
+  const toast = useToast()
   const [formData, setFormData] = useState({
     username: '',
     password: '',
@@ -48,19 +61,28 @@ export default function LoginPage() {
         body: JSON.stringify(formData),
       })
 
-      const data: LoginResponse = await response.json()
+      const data = await response.json()
 
       if (!response.ok) {
-        throw new Error(data.detail || 'Login failed')
+        // Handle new error format
+        const errorMessage = data.error?.message || data.detail || 'Login failed'
+        throw new Error(errorMessage)
       }
 
+      const loginData: LoginResponse = data
+
       // Store token and user info using AuthContext
-      login(data.access_token, data.user)
+      login(loginData.access_token, loginData.refresh_token, loginData.user)
+
+      // Show success toast
+      toast.success(`Welcome back, ${loginData.user.username}!`)
 
       // Navigate to home or editor
       navigate('/')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred')
+      const errorMessage = err instanceof Error ? err.message : 'An error occurred'
+      setError(errorMessage)
+      toast.error(errorMessage)
     } finally {
       setLoading(false)
     }

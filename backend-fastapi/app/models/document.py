@@ -31,6 +31,7 @@ class Document(Base):
         id: Primary key
         user_id: Foreign key to users table (owner)
         title: Document title
+        document_number: Unique document number (e.g., DOC-20260213-001)
         description: Document description (optional)
         category: Document category/tag (optional)
         project_id: Foreign key to projects table (optional)
@@ -45,6 +46,7 @@ class Document(Base):
     id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     title = Column(String(255), nullable=False)
+    document_number = Column(String(20), unique=True, index=True, nullable=True)  # 文档编号
     description = Column(Text, nullable=True)
     category = Column(String(100), nullable=True, index=True)
     project_id = Column(Integer, ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True)

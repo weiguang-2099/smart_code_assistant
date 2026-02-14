@@ -2,7 +2,7 @@
 Authentication API routes for user registration and login.
 """
 from datetime import timedelta
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,16 +10,28 @@ from app.database import get_db
 from app.core.security import (
     verify_password,
     get_password_hash,
-    create_access_token,
+    create_token_pair,
+    validate_refresh_token,
+    revoke_token,
+    revoke_all_user_tokens,
 )
 from app.core.config import settings
 from app.core.deps import get_current_user
+from app.core.exceptions import (
+    InvalidCredentialsException,
+    AccountDisabledException,
+    DuplicateEntryException,
+    InvalidTokenException,
+    UserNotFoundException,
+)
 from app.schemas.user import (
     UserRegister,
     UserLogin,
     UserResponse,
     UserWithToken,
     Token,
+    TokenRefreshResponse,
+    RefreshTokenRequest,
     UserUpdate,
 )
 from app.models.user import User
@@ -41,25 +53,16 @@ async def register(
 
     Returns:
         UserWithToken: Created user with access token
-
-    Raises:
-        HTTPException: If username or email already exists
     """
     # Check if username exists
     result = await db.execute(select(User).where(User.username == user_data.username))
     if result.scalar_one_or_none():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Username already registered"
-        )
+        raise DuplicateEntryException(field="username")
 
     # Check if email exists
     result = await db.execute(select(User).where(User.email == user_data.email))
     if result.scalar_one_or_none():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered"
-        )
+        raise DuplicateEntryException(field="email")
 
     # Create new user
     new_user = User(
@@ -73,11 +76,8 @@ async def register(
     await db.commit()
     await db.refresh(new_user)
 
-    # Create access token
-    access_token = create_access_token(
-        data={"sub": str(new_user.id)},
-        expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
-    )
+    # Create token pair
+    access_token, refresh_token, _, _ = create_token_pair(new_user.id)
 
     return UserWithToken(
         id=new_user.id,
@@ -89,6 +89,7 @@ async def register(
         created_at=new_user.created_at,
         updated_at=new_user.updated_at,
         access_token=access_token,
+        refresh_token=refresh_token,
         token_type="bearer",
     )
 
@@ -106,10 +107,7 @@ async def login(
         db: Database session
 
     Returns:
-        Token: Access token with user info
-
-    Raises:
-        HTTPException: If credentials are invalid
+        Token: Access token, refresh token with user info
     """
     # Try to find user by username or email
     result = await db.execute(
@@ -121,30 +119,118 @@ async def login(
 
     # Verify user exists and password is correct
     if not user or not verify_password(user_data.password, user.hashed_password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username/email or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        raise InvalidCredentialsException()
 
     # Check if user is active
     if not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="User account is inactive"
-        )
+        raise AccountDisabledException()
 
-    # Create access token
-    access_token = create_access_token(
-        data={"sub": str(user.id)},
-        expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
-    )
+    # Update last login time
+    from datetime import datetime
+    user.last_login_at = datetime.utcnow()
+    await db.commit()
+
+    # Create token pair
+    access_token, refresh_token, _, _ = create_token_pair(user.id)
 
     return Token(
         access_token=access_token,
+        refresh_token=refresh_token,
         token_type="bearer",
+        expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         user=UserResponse.model_validate(user),
     )
+
+
+@router.post("/refresh", response_model=TokenRefreshResponse)
+async def refresh_token(
+    request: RefreshTokenRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Refresh access token using refresh token.
+
+    Args:
+        request: Refresh token request
+        db: Database session
+
+    Returns:
+        TokenRefreshResponse: New access token and refresh token
+    """
+    # Validate refresh token
+    payload = validate_refresh_token(request.refresh_token)
+
+    if payload is None:
+        raise InvalidTokenException(message="Invalid or expired refresh token")
+
+    user_id = payload.get("user_id")
+    if user_id is None:
+        raise InvalidTokenException(message="Invalid refresh token format")
+
+    # Get user from database
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+
+    if user is None:
+        raise UserNotFoundException(user_id=user_id)
+
+    if not user.is_active:
+        raise AccountDisabledException()
+
+    # Revoke old refresh token
+    revoke_token(request.refresh_token, user_id)
+
+    # Create new token pair
+    access_token, refresh_token, _, _ = create_token_pair(user.id)
+
+    return TokenRefreshResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        token_type="bearer",
+        expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    )
+
+
+@router.post("/logout")
+async def logout(
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Logout current user.
+
+    Revokes the current user's token version, invalidating all tokens.
+    For single-device logout, the client should discard tokens locally.
+
+    Returns:
+        dict: Logout confirmation message
+    """
+    # Increment token version to invalidate all tokens
+    revoke_all_user_tokens(current_user.id)
+
+    return {
+        "success": True,
+        "message": "Successfully logged out"
+    }
+
+
+@router.post("/logout-all")
+async def logout_all_devices(
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Logout from all devices.
+
+    Increments the token version, invalidating all tokens across all devices.
+
+    Returns:
+        dict: Logout confirmation message
+    """
+    revoke_all_user_tokens(current_user.id)
+
+    return {
+        "success": True,
+        "message": "Successfully logged out from all devices"
+    }
 
 
 @router.get("/me", response_model=UserResponse)
@@ -189,10 +275,7 @@ async def update_current_user(
             )
         )
         if result.scalar_one_or_none():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Email already registered"
-            )
+            raise DuplicateEntryException(field="email")
         current_user.email = user_update.email
 
     if user_update.full_name is not None:
@@ -200,23 +283,10 @@ async def update_current_user(
 
     if user_update.password is not None:
         current_user.hashed_password = get_password_hash(user_update.password)
+        # Revoke all tokens when password changes
+        revoke_all_user_tokens(current_user.id)
 
     await db.commit()
     await db.refresh(current_user)
 
     return UserResponse.model_validate(current_user)
-
-
-@router.post("/logout")
-async def logout():
-    """
-    Logout current user.
-
-    Note: Since we use JWT tokens, logout is handled client-side
-    by removing the token. This endpoint exists for future implementation
-    of token blacklisting if needed.
-
-    Returns:
-        dict: Logout confirmation message
-    """
-    return {"message": "Successfully logged out"}

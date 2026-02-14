@@ -10,6 +10,7 @@ export type SourceType = 'upload' | 'manual' | 'parsed'
 export interface Document {
   id: number
   user_id: number
+  document_number: string | null
   title: string
   description: string | null
   category: string | null
@@ -19,6 +20,22 @@ export interface Document {
   version_count: number
   created_at: string
   updated_at: string
+}
+
+
+// ==================== Outline Types ====================
+
+export interface OutlineItem {
+  level: number
+  text: string
+  anchor: string
+  line_number: number | null
+  children: OutlineItem[]
+}
+
+export interface DocumentOutlineResponse {
+  document_id: number
+  outline: OutlineItem[]
 }
 
 export interface DocumentCreate {

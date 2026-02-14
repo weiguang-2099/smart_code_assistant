@@ -1,6 +1,8 @@
 """
 Document API routes for managing user documents with version control.
 """
+import re
+from datetime import datetime
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy import select, func, delete, or_
@@ -18,11 +20,84 @@ from app.schemas.document import (
     VersionCreate,
     VersionResponse,
     VersionListItem,
+    OutlineItem,
+    DocumentOutlineResponse,
 )
 from app.models.user import User
 from app.models.document import Document, RawVersion
 
 router = APIRouter()
+
+
+# ==================== Helper Functions ====================
+
+async def generate_document_number(db: AsyncSession, user_id: int) -> str:
+    """Generate a unique document number in format DOC-YYYYMMDD-NNN."""
+    today = datetime.utcnow().strftime("%Y%m%d")
+    prefix = f"DOC-{today}-"
+
+    # Find the highest number for today
+    result = await db.execute(
+        select(Document.document_number)
+        .where(Document.user_id == user_id, Document.document_number.like(f"{prefix}%"))
+        .order_by(Document.document_number.desc())
+        .limit(1)
+    )
+    last_number = result.scalar_one_or_none()
+
+    if last_number:
+        try:
+            seq = int(last_number.split("-")[-1]) + 1
+        except (ValueError, IndexError):
+            seq = 1
+    else:
+        seq = 1
+
+    return f"{prefix}{seq:03d}"
+
+
+def extract_outline_from_markdown(markdown: str) -> List[OutlineItem]:
+    """Extract outline from markdown content."""
+    lines = markdown.split("\n")
+    headings = []
+
+    for i, line in enumerate(lines):
+        match = re.match(r"^(#{1,6})\s+(.+)$", line)
+        if match:
+            level = len(match.group(1))
+            text = match.group(2).strip()
+            # Generate anchor from text
+            anchor = re.sub(r"[^\w\u4e00-\u9fff]+", "-", text.lower()).strip("-")
+            anchor = anchor[:50] or f"heading-{i}"
+            headings.append(OutlineItem(
+                level=level,
+                text=text,
+                anchor=anchor,
+                line_number=i + 1,
+                children=[],
+            ))
+
+    # Build tree structure
+    return build_outline_tree(headings)
+
+
+def build_outline_tree(headings: List[OutlineItem]) -> List[OutlineItem]:
+    """Build a tree structure from flat heading list."""
+    if not headings:
+        return []
+
+    root = OutlineItem(level=0, text="", anchor="", children=[])
+    stack = [root]
+
+    for heading in headings:
+        # Find parent (last heading with lower level)
+        while stack[-1].level >= heading.level:
+            stack.pop()
+
+        stack[-1].children.append(heading)
+        stack.append(heading)
+
+    return root.children
 
 
 @router.get("/test")
@@ -50,10 +125,14 @@ async def create_document(
     Returns:
         DocumentResponse: Created document
     """
+    # Generate document number
+    document_number = await generate_document_number(db, current_user.id)
+
     # Create new document
     new_document = Document(
         user_id=current_user.id,
         title=document_data.title,
+        document_number=document_number,
         description=document_data.description,
         category=document_data.category,
         project_id=document_data.project_id,
@@ -66,6 +145,7 @@ async def create_document(
     return DocumentResponse(
         id=new_document.id,
         user_id=new_document.user_id,
+        document_number=new_document.document_number,
         title=new_document.title,
         description=new_document.description,
         category=new_document.category,
@@ -161,6 +241,7 @@ async def list_documents(
             DocumentResponse(
                 id=doc.id,
                 user_id=doc.user_id,
+                document_number=doc.document_number,
                 title=doc.title,
                 description=doc.description,
                 category=doc.category,
@@ -274,6 +355,7 @@ async def get_document(
     return DocumentDetail(
         id=document.id,
         user_id=document.user_id,
+        document_number=document.document_number,
         title=document.title,
         description=document.description,
         category=document.category,
@@ -348,6 +430,7 @@ async def update_document_metadata(
     return DocumentResponse(
         id=document.id,
         user_id=document.user_id,
+        document_number=document.document_number,
         title=document.title,
         description=document.description,
         category=document.category,
@@ -480,3 +563,60 @@ async def delete_document(
     # Delete document (cascade will delete versions)
     await db.execute(delete(Document).where(Document.id == document_id))
     await db.commit()
+
+
+# ==================== Document Outline ====================
+
+@router.get("/{document_id}/outline", response_model=DocumentOutlineResponse)
+async def get_document_outline(
+    document_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Extract and return the outline (table of contents) from a document's current version.
+
+    Args:
+        document_id: Document ID
+        current_user: Current authenticated user
+        db: Database session
+
+    Returns:
+        DocumentOutlineResponse: Document outline with nested headings
+
+    Raises:
+        HTTPException: If document not found, access denied, or no content
+    """
+    # Get document with current version
+    result = await db.execute(
+        select(Document)
+        .options(selectinload(Document.current_version))
+        .where(Document.id == document_id)
+    )
+    document = result.scalar_one_or_none()
+
+    if not document:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found"
+        )
+
+    if document.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied"
+        )
+
+    if not document.current_version:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document has no content"
+        )
+
+    # Extract outline from markdown content
+    outline = extract_outline_from_markdown(document.current_version.markdown_content)
+
+    return DocumentOutlineResponse(
+        document_id=document_id,
+        outline=outline,
+    )

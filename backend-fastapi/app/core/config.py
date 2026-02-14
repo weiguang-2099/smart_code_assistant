@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "your-secret-key-change-this-in-production"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7  # Refresh token expires in 7 days
+
+    # Rate Limiting
+    RATE_LIMIT_REQUESTS: int = 100  # Max requests per minute
+    RATE_LIMIT_LOGIN_REQUESTS: int = 5  # Max login attempts per minute
 
     # CORS
     CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://localhost:3000", "http://localhost:8080"]

@@ -74,6 +74,14 @@ export interface UserStats {
   storage_used: number
 }
 
+export interface EnhancedUserStats extends UserStats {
+  agents_count: number
+  total_conversations: number
+  total_training_tasks: number
+  last_login_at: string | null
+  member_since: string
+}
+
 // ==================== Full User Profile Types ====================
 
 export interface FullUserProfile {

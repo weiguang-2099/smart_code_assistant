@@ -1,14 +1,19 @@
 """
 Project API routes for managing code projects.
 """
+import logging
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, status, Query
 from sqlalchemy import select, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.database import get_db
 from app.core.deps import get_current_user
+from app.core.exceptions import (
+    ProjectNotFoundException,
+    ForbiddenException,
+)
 from app.schemas.project import (
     ProjectCreate,
     ProjectUpdate,
@@ -21,12 +26,7 @@ from app.models.project import Project
 from app.models.code_file import CodeFile
 
 router = APIRouter()
-
-
-@router.get("/test")
-async def test_endpoint():
-    """Test endpoint to verify router is working."""
-    return {"message": "Projects router is working"}
+logger = logging.getLogger(__name__)
 
 
 @router.post("", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
@@ -87,64 +87,57 @@ async def list_projects(
     Returns:
         ProjectListResponse: Paginated list of projects
     """
-    import sys
-    try:
-        # Debug
-        print(f"DEBUG: list_projects called, user_id={current_user.id}", file=sys.stderr)
+    # Get total count
+    count_query = select(func.count()).select_from(Project).where(
+        Project.owner_id == current_user.id
+    )
+    total_result = await db.execute(count_query)
+    total = total_result.scalar()
 
-        # Get total count
-        count_query = select(func.count()).select_from(Project).where(Project.owner_id == current_user.id)
-        total_result = await db.execute(count_query)
-        total = total_result.scalar()
-        print(f"DEBUG: total={total}", file=sys.stderr)
+    # Get projects
+    offset = (page - 1) * page_size
+    projects_query = (
+        select(Project)
+        .where(Project.owner_id == current_user.id)
+        .order_by(Project.updated_at.desc())
+        .offset(offset)
+        .limit(page_size)
+    )
 
-        # Get projects
-        offset = (page - 1) * page_size
-        projects_query = (
-            select(Project)
-            .where(Project.owner_id == current_user.id)
-            .order_by(Project.updated_at.desc())
-            .offset(offset)
-            .limit(page_size)
+    result = await db.execute(projects_query)
+    projects = result.scalars().all()
+
+    # Build response with file counts
+    project_responses = []
+    for project in projects:
+        # Get file count for each project
+        file_count_query = select(func.count()).select_from(CodeFile).where(
+            CodeFile.project_id == project.id
         )
+        file_count_result = await db.execute(file_count_query)
+        file_count = file_count_result.scalar() or 0
 
-        result = await db.execute(projects_query)
-        projects = result.scalars().all()
-        print(f"DEBUG: found {len(projects)} projects", file=sys.stderr)
-
-        # Build response with file counts
-        project_responses = []
-        for project in projects:
-            # Simplified: set file_count to 0 for now
-            file_count = 0
-
-            project_responses.append(
-                ProjectResponse(
-                    id=project.id,
-                    name=project.name,
-                    description=project.description,
-                    owner_id=project.owner_id,
-                    created_at=project.created_at,
-                    updated_at=project.updated_at,
-                    file_count=file_count,
-                )
+        project_responses.append(
+            ProjectResponse(
+                id=project.id,
+                name=project.name,
+                description=project.description,
+                owner_id=project.owner_id,
+                created_at=project.created_at,
+                updated_at=project.updated_at,
+                file_count=file_count,
             )
-
-        total_pages = (total + page_size - 1) // page_size
-        print(f"DEBUG: returning response", file=sys.stderr)
-
-        return ProjectListResponse(
-            projects=project_responses,
-            total=total,
-            page=page,
-            page_size=page_size,
-            total_pages=total_pages,
         )
-    except Exception as e:
-        import traceback
-        print(f"ERROR: {e}", file=sys.stderr)
-        traceback.print_exc(file=sys.stderr)
-        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
+
+    total_pages = (total + page_size - 1) // page_size if total > 0 else 1
+
+    return ProjectListResponse(
+        projects=project_responses,
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages,
+    )
 
 
 @router.get("/{project_id}", response_model=ProjectDetail)
@@ -165,7 +158,8 @@ async def get_project(
         ProjectDetail: Project details
 
     Raises:
-        HTTPException: If project not found or access denied
+        ProjectNotFoundException: If project not found
+        ForbiddenException: If access denied
     """
     # Get project with owner and files
     result = await db.execute(
@@ -176,17 +170,11 @@ async def get_project(
     project = result.scalar_one_or_none()
 
     if not project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Project not found"
-        )
+        raise ProjectNotFoundException(project_id=project_id)
 
     # Check ownership
     if project.owner_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied"
-        )
+        raise ForbiddenException(message="You don't have access to this project")
 
     # Get files for the project
     files_result = await db.execute(
@@ -240,24 +228,19 @@ async def update_project(
         ProjectResponse: Updated project
 
     Raises:
-        HTTPException: If project not found or access denied
+        ProjectNotFoundException: If project not found
+        ForbiddenException: If access denied
     """
     # Get project
     result = await db.execute(select(Project).where(Project.id == project_id))
     project = result.scalar_one_or_none()
 
     if not project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Project not found"
-        )
+        raise ProjectNotFoundException(project_id=project_id)
 
     # Check ownership
     if project.owner_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied"
-        )
+        raise ForbiddenException(message="You don't have access to this project")
 
     # Update fields
     if project_update.name is not None:
@@ -269,7 +252,9 @@ async def update_project(
     await db.refresh(project)
 
     # Get file count
-    file_count_query = select(func.count()).select_from(CodeFile).where(CodeFile.project_id == project.id)
+    file_count_query = select(func.count()).select_from(CodeFile).where(
+        CodeFile.project_id == project.id
+    )
     file_count_result = await db.execute(file_count_query)
     file_count = file_count_result.scalar() or 0
 
@@ -299,24 +284,19 @@ async def delete_project(
         db: Database session
 
     Raises:
-        HTTPException: If project not found or access denied
+        ProjectNotFoundException: If project not found
+        ForbiddenException: If access denied
     """
     # Get project
     result = await db.execute(select(Project).where(Project.id == project_id))
     project = result.scalar_one_or_none()
 
     if not project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Project not found"
-        )
+        raise ProjectNotFoundException(project_id=project_id)
 
     # Check ownership
     if project.owner_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied"
-        )
+        raise ForbiddenException(message="You don't have access to this project")
 
     # Delete project (cascade will delete files)
     await db.execute(delete(Project).where(Project.id == project_id))
