@@ -25,20 +25,27 @@ frontend/.DS_Store
 frontend/.eslintracheck
 
 # === Backend FastAPI (Python) ===
-backend-fastapi/__pycache__/
-backend-fastapi/*/__pycache__/
-backend-fastapi/*.py[cod]
-backend-fastapi/*$py.class
-backend-fastapi/venv/
-backend-fastapi/.venv/
-backend-fastapi/env/
-backend-fastapi/ENV/
-backend-fastapi/*.egg-info/
-backend-fastapi/.pytest_cache/
-backend-fastapi/.coverage
-backend-fastapi/htmlcov/
-backend-fastapi/*.log
-backend-fastapi/.python-version
+**/__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+.Python
+venv/
+.venv/
+env/
+ENV/
+*.egg
+*.egg-info/
+.eggs/
+.pytest_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+*.log
+.python-version
+.mypy_cache/
+.ruff_cache/
 backend-fastapi/backend-dotnet/
 
 # === Backend .NET ===
