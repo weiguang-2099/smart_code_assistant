@@ -22,8 +22,64 @@ services:
     networks:
       - smart-code-assistant-network
 
+  # Neo4j 图数据库 - 用于代码知识图谱
+  neo4j:
+    image: neo4j:5.15-community
+    container_name: smart-code-assistant-neo4j
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: neo4j/codegraph123
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_dbms_memory_heap_initial__size: "512m"
+      NEO4J_dbms_memory_heap_max__size: "1G"
+      NEO4J_dbms_memory_pagecache_size: "512m"
+    ports:
+      - "7474:7474"   # HTTP Web控制台
+      - "7687:7687"   # Bolt协议
+    volumes:
+      - neo4j-data:/data
+      - neo4j-logs:/logs
+      - neo4j-import:/var/lib/neo4j/import
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:7474 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - smart-code-assistant-network
+
+  # ChromaDB 向量数据库 - 用于代码语义搜索
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: smart-code-assistant-chromadb
+    restart: unless-stopped
+    environment:
+      - IS_PERSISTENT=TRUE
+      - ANONYMIZED_TELEMETRY=FALSE
+    ports:
+      - "8001:8000"
+    volumes:
+      - chromadb-data:/chroma/chroma
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/api/v1/heartbeat || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - smart-code-assistant-network
+
 volumes:
   mysql-data:
+    driver: local
+  neo4j-data:
+    driver: local
+  neo4j-logs:
+    driver: local
+  neo4j-import:
+    driver: local
+  chromadb-data:
     driver: local
 
 networks:

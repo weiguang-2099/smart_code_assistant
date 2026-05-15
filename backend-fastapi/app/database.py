@@ -1,22 +1,24 @@
 """
 Database connection and session management for Smart Code Assistant.
 """
+import logging
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.pool import NullPool
 
 from app.core.config import settings
 
-# Create async engine
+logger = logging.getLogger(__name__)
+
 engine = create_async_engine(
     settings.DATABASE_URL,
     echo=settings.FASTAPI_ENV == "development",
     pool_pre_ping=True,
     pool_size=10,
     max_overflow=20,
+    pool_recycle=3600,
 )
 
-# Create async session factory
 AsyncSessionLocal = async_sessionmaker(
     engine,
     class_=AsyncSession,
@@ -25,8 +27,24 @@ AsyncSessionLocal = async_sessionmaker(
     autoflush=False,
 )
 
-# Base class for all models
 Base = declarative_base()
+
+_query_monitoring_enabled = False
+
+
+def enable_query_monitoring() -> None:
+    """Enable query performance monitoring."""
+    global _query_monitoring_enabled
+    if _query_monitoring_enabled:
+        return
+
+    try:
+        from app.core.query_analyzer import setup_query_monitoring
+        setup_query_monitoring(engine)
+        _query_monitoring_enabled = True
+        logger.info("Query monitoring enabled")
+    except Exception as e:
+        logger.warning(f"Failed to enable query monitoring: {e}")
 
 
 async def get_db() -> AsyncSession:

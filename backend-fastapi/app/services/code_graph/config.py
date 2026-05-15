@@ -1,0 +1,39 @@
+"""
+Code Graph Configuration - 代码图谱配置
+"""
+from dataclasses import dataclass, field
+from typing import List, Optional
+from app.core.config import settings
+
+
+@dataclass
+class CodeGraphConfig:
+    """代码图谱配置"""
+
+    # Neo4j 配置
+    neo4j_uri: str = field(default_factory=lambda: settings.NEO4J_URI)
+    neo4j_user: str = field(default_factory=lambda: settings.NEO4J_USER)
+    neo4j_password: str = field(default_factory=lambda: settings.NEO4J_PASSWORD)
+    neo4j_database: str = field(default_factory=lambda: settings.NEO4J_DATABASE)
+
+    # ChromaDB 配置
+    chromadb_host: str = field(default_factory=lambda: settings.CHROMADB_HOST)
+    chromadb_port: int = field(default_factory=lambda: settings.CHROMADB_PORT)
+    chromadb_persist_dir: str = field(default_factory=lambda: settings.CHROMADB_PERSIST_DIR)
+
+    # 图谱配置
+    max_depth: int = field(default_factory=lambda: settings.CODE_GRAPH_MAX_DEPTH)
+    embedding_model: str = field(default_factory=lambda: settings.CODE_GRAPH_EMBEDDING_MODEL)
+    max_entities: int = field(default_factory=lambda: settings.CODE_GRAPH_MAX_ENTITIES)
+    enable_semantic_search: bool = field(
+        default_factory=lambda: settings.CODE_GRAPH_ENABLE_SEMANTIC_SEARCH
+    )
+
+    # 支持的编程语言
+    supported_languages: List[str] = field(
+        default_factory=lambda: ["python", "javascript", "typescript"]
+    )
+
+
+# 全局配置实例
+code_graph_config = CodeGraphConfig()

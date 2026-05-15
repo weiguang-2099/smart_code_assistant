@@ -8,6 +8,16 @@ import ast
 from typing import Optional
 from langchain_core.tools import tool
 
+# 导入代码图谱工具
+from app.services.code_graph.tools import (
+    build_code_graph,
+    query_code_dependencies,
+    analyze_impact,
+    find_code_paths,
+    search_code_semantic,
+    code_graph_tool_descriptions
+)
+
 
 @tool
 def analyze_code_structure(code: str, language: str = "python") -> str:
@@ -346,20 +356,71 @@ def search_code_pattern(code: str, pattern: str) -> str:
         return f"正则表达式错误: {str(e)}"
 
 
-# 导出所有工具
+# 代码分析工具枚举
+class CodeToolName:
+    """工具名称常量，避免硬编码"""
+    ANALYZE_STRUCTURE = "analyze_code_structure"
+    DETECT_SMELLS = "detect_code_smells"
+    CALCULATE_COMPLEXITY = "calculate_code_complexity"
+    CHECK_SECURITY = "check_security_issues"
+    SEARCH_PATTERN = "search_code_pattern"
+    BUILD_GRAPH = "build_code_graph"
+    QUERY_DEPENDENCIES = "query_code_dependencies"
+    ANALYZE_IMPACT = "analyze_impact"
+    FIND_PATHS = "find_code_paths"
+    SEARCH_SEMANTIC = "search_code_semantic"
+
+
+# 导出所有工具（列表形式，保持向后兼容）
 langchain_tools = [
+    # 原有代码分析工具
     analyze_code_structure,
     detect_code_smells,
     calculate_code_complexity,
     check_security_issues,
     search_code_pattern,
+    # 代码图谱工具
+    build_code_graph,
+    query_code_dependencies,
+    analyze_impact,
+    find_code_paths,
+    search_code_semantic,
 ]
+
+# 工具字典（按名称访问，推荐使用）
+langchain_tools_dict = {
+    CodeToolName.ANALYZE_STRUCTURE: analyze_code_structure,
+    CodeToolName.DETECT_SMELLS: detect_code_smells,
+    CodeToolName.CALCULATE_COMPLEXITY: calculate_code_complexity,
+    CodeToolName.CHECK_SECURITY: check_security_issues,
+    CodeToolName.SEARCH_PATTERN: search_code_pattern,
+    CodeToolName.BUILD_GRAPH: build_code_graph,
+    CodeToolName.QUERY_DEPENDENCIES: query_code_dependencies,
+    CodeToolName.ANALYZE_IMPACT: analyze_impact,
+    CodeToolName.FIND_PATHS: find_code_paths,
+    CodeToolName.SEARCH_SEMANTIC: search_code_semantic,
+}
 
 # 工具描述映射（用于 Agent）
 tool_descriptions = {
-    "analyze_code_structure": "分析代码结构，提取函数、类、依赖等基本信息",
-    "detect_code_smells": "检测代码坏味道，包括长函数、重复代码、命名问题等",
-    "calculate_code_complexity": "计算代码复杂度（圈复杂度）并提供评分",
-    "check_security_issues": "检测代码中的安全漏洞和问题",
-    "search_code_pattern": "在代码中搜索特定模式",
+    CodeToolName.ANALYZE_STRUCTURE: "分析代码结构，提取函数、类、依赖等基本信息",
+    CodeToolName.DETECT_SMELLS: "检测代码坏味道，包括长函数、重复代码、命名问题等",
+    CodeToolName.CALCULATE_COMPLEXITY: "计算代码复杂度（圈复杂度）并提供评分",
+    CodeToolName.CHECK_SECURITY: "检测代码中的安全漏洞和问题",
+    CodeToolName.SEARCH_PATTERN: "在代码中搜索特定模式",
+    # 代码图谱工具描述
+    **code_graph_tool_descriptions
 }
+
+
+def get_tool(tool_name: str):
+    """
+    根据名称获取工具
+
+    Args:
+        tool_name: 工具名称，使用 CodeToolName 常量
+
+    Returns:
+        对应的工具函数，如果不存在返回 None
+    """
+    return langchain_tools_dict.get(tool_name)

@@ -4,23 +4,9 @@ Agent schemas for request and response validation.
 from datetime import datetime
 from typing import Optional, List, Any, Dict
 from pydantic import BaseModel, Field, ConfigDict
-from enum import Enum
 
-
-class AgentStatus(str, Enum):
-    """Agent status enum."""
-    draft = "draft"
-    active = "active"
-    inactive = "inactive"
-    training = "training"
-
-
-class TrainingStatus(str, Enum):
-    """Training task status enum."""
-    pending = "pending"
-    running = "running"
-    completed = "completed"
-    failed = "failed"
+# Import enums from models to ensure consistency
+from app.models.agent import AgentStatus, TrainingStatus
 
 
 # ==================== Agent Schemas ====================
@@ -46,6 +32,7 @@ class AgentUpdate(BaseModel):
     avatar_url: Optional[str] = Field(None, max_length=500, description="Avatar URL")
     system_prompt: Optional[str] = Field(None, description="System prompt")
     config: Optional[Dict[str, Any]] = Field(None, description="Configuration")
+    status: Optional[AgentStatus] = Field(None, description="Agent status")
 
 
 class AgentStatusUpdate(BaseModel):
@@ -216,3 +203,85 @@ class AgentNameSuggestionResponse(BaseModel):
     """Schema for agent name suggestion response."""
     names: List[str] = Field(..., description="List of suggested agent names")
     domain: str = Field(..., description="The domain used for generation")
+
+
+# ==================== Agent Workflow Schemas ====================
+# 以下 Schema 用于 Agent 代码分析、生成、审查和聊天功能
+
+class AgentAnalyzeRequest(BaseModel):
+    """Agent 代码分析请求"""
+    code: str = Field(..., description="要分析的代码")
+    language: str = Field(default="python", description="编程语言")
+    focus_areas: Optional[List[str]] = Field(
+        default=None,
+        description="关注领域: structure, smells, complexity, security, all"
+    )
+
+
+class AgentAnalyzeResponse(BaseModel):
+    """Agent 代码分析响应"""
+    analysis: str = Field(..., description="分析结果")
+    structure: Optional[str] = Field(None, description="代码结构")
+    smells: Optional[str] = Field(None, description="代码坏味道")
+    complexity: Optional[str] = Field(None, description="复杂度分析")
+    security: Optional[str] = Field(None, description="安全问题")
+    recommendations: List[str] = Field(default_factory=list, description="改进建议")
+
+
+class AgentGenerateRequest(BaseModel):
+    """Agent 代码生成请求"""
+    prompt: str = Field(..., description="需求描述")
+    language: str = Field(default="python", description="目标编程语言")
+    context: Optional[str] = Field(None, description="上下文信息")
+    use_tools: bool = Field(default=False, description="是否使用工具分析")
+
+
+class AgentGenerateResponse(BaseModel):
+    """Agent 代码生成响应"""
+    code: str = Field(..., description="生成的代码")
+    explanation: str = Field(..., description="代码说明")
+    analysis: Optional[str] = Field(None, description="代码分析（如果使用工具）")
+
+
+class AgentReviewRequest(BaseModel):
+    """Agent 代码审查请求"""
+    code: str = Field(..., description="要审查的代码")
+    language: str = Field(default="python", description="编程语言")
+    deep_analysis: bool = Field(default=True, description="是否进行深度分析")
+
+
+class AgentReviewResponse(BaseModel):
+    """Agent 代码审查响应"""
+    overall_score: int = Field(..., description="总体评分 (0-100)")
+    summary: str = Field(..., description="审查摘要")
+    structure: Optional[str] = Field(None, description="结构分析")
+    issues: List[str] = Field(default_factory=list, description="发现的问题")
+    suggestions: List[str] = Field(default_factory=list, description="改进建议")
+    security_issues: List[str] = Field(default_factory=list, description="安全问题")
+    improved_code: Optional[str] = Field(None, description="改进后的代码")
+
+
+class AgentChatRequest(BaseModel):
+    """Agent 聊天请求"""
+    message: str = Field(..., description="用户消息")
+    history: Optional[List[Dict[str, str]]] = Field(
+        default_factory=list,
+        description="对话历史"
+    )
+    language: str = Field(default="python", description="编程语言")
+
+
+class AgentChatResponse(BaseModel):
+    """Agent 聊天响应"""
+    response: str = Field(..., description="Agent 响应")
+    code_blocks: List[Dict[str, str]] = Field(
+        default_factory=list,
+        description="提取的代码块"
+    )
+
+
+class StreamChatRequest(BaseModel):
+    """Streaming chat request"""
+    message: str = Field(..., description="User message")
+    history: Optional[List[Dict[str, str]]] = Field(default_factory=list)
+    language: str = Field(default="python")

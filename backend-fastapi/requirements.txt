@@ -22,3 +22,15 @@ langgraph>=0.2.0
 # PDF parsing and format conversion
 markdown-it-py>=3.0.0
 mdit-py-plugins>=0.4.0
+# Code GraphRAG dependencies
+neo4j>=5.15.0
+chromadb>=0.4.22
+langchain-community>=0.3.0
+sentence-transformers>=2.2.0
+tenacity>=8.2.0
+tiktoken>=0.5.0
+# OpenTelemetry for APM and distributed tracing
+opentelemetry-api>=1.20.0
+opentelemetry-sdk>=1.20.0
+opentelemetry-exporter-otlp>=1.20.0
+opentelemetry-exporter-jaeger>=1.20.0

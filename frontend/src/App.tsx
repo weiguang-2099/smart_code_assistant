@@ -1,29 +1,63 @@
-import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom'
+/**
+ * App - Main application with route-level code splitting
+ *
+ * Performance optimizations:
+ * - Lazy loading for all route components
+ * - Suspense with loading fallback
+ * - Route-based chunk splitting
+ */
+import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { ToastProvider } from './contexts/ToastContext'
 import ErrorBoundary from './components/ErrorBoundary'
-import { useEffect, useState } from 'react'
-import EditorPage from './pages/EditorPage'
-import ProjectsPage from './pages/ProjectsPage'
-import CodeGenPage from './pages/CodeGenPage'
-import LoginPage from './pages/LoginPage'
-import RegisterPage from './pages/RegisterPage'
-import DocumentsPage from './pages/DocumentsPage'
-import DocumentEditorPage from './pages/DocumentEditorPage'
-import ProfilePage from './pages/ProfilePage'
-import AgentsPage from './pages/AgentsPage'
+import { LoadingPage } from './components/common/Loading'
+import { Suspense, lazy, useEffect, useState, useCallback, useMemo } from 'react'
 
-// Particle component for background effect - optimized
-function Particles() {
+// Lazy-loaded pages for code splitting
+const EditorPage = lazy(() => import('./pages/EditorPage'))
+const ProjectsPage = lazy(() => import('./pages/ProjectsPage'))
+const CodeGenPage = lazy(() => import('./pages/CodeGenPage'))
+const LoginPage = lazy(() => import('./pages/LoginPage'))
+const RegisterPage = lazy(() => import('./pages/RegisterPage'))
+const DocumentsPage = lazy(() => import('./pages/DocumentsPage'))
+const DocumentEditorPage = lazy(() => import('./pages/DocumentEditorPage'))
+const ProfilePage = lazy(() => import('./pages/ProfilePage'))
+const AgentsPage = lazy(() => import('./pages/AgentsPage'))
+const AgentChatPage = lazy(() => import('./pages/AgentChatPage'))
+const CodeAnalysisPage = lazy(() => import('./pages/CodeAnalysisPage'))
+
+// Preload critical routes on hover
+const preloadPage = (page: string) => {
+  switch (page) {
+    case 'projects':
+      import('./pages/ProjectsPage')
+      break
+    case 'documents':
+      import('./pages/DocumentsPage')
+      break
+    case 'agents':
+      import('./pages/AgentsPage')
+      break
+    case 'editor':
+      import('./pages/EditorPage')
+      break
+    case 'generate':
+      import('./pages/CodeGenPage')
+      break
+  }
+}
+
+// Optimized Particles component with memoization
+const Particles = React.memo(function Particles() {
   const [particles, setParticles] = useState<number[]>([])
 
   useEffect(() => {
-    const count = 15 // Reduced from 20 for better performance
+    const count = 12
     setParticles(Array.from({ length: count }, (_, i) => i))
   }, [])
 
   return (
-    <div className="particles">
+    <div className="particles" aria-hidden="true">
       {particles.map((i) => (
         <div
           key={i}
@@ -31,68 +65,99 @@ function Particles() {
           style={{
             left: `${Math.random() * 100}%`,
             animationDelay: `${Math.random() * 20}s`,
-            animationDuration: `${20 + Math.random() * 15}s` // Slower, varied speeds
+            animationDuration: `${20 + Math.random() * 15}s`,
           }}
         />
       ))}
     </div>
   )
-}
+})
 
-function Navbar() {
+// Optimized Navbar with memoization and hover preloading
+const Navbar = React.memo(function Navbar() {
   const { user, isAuthenticated, logout } = useAuth()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const location = useLocation()
+
+  useEffect(() => {
+    setMobileMenuOpen(false)
+  }, [location.pathname])
+
+  const handleMouseEnter = useCallback((page: string) => {
+    preloadPage(page)
+  }, [])
+
+  const navLinks = useMemo(
+    () => [
+      { to: '/projects', label: 'Projects', preload: 'projects' },
+      { to: '/documents', label: 'Docs', preload: 'documents', color: 'purple' },
+      { to: '/agents', label: 'Agents', preload: 'agents', color: 'pink' },
+      { to: '/editor', label: 'Editor', preload: 'editor' },
+      { to: '/generate', label: 'Generate', preload: 'generate' },
+      { to: '/code-analysis', label: 'Analysis', preload: 'code-analysis', color: 'green' },
+    ],
+    []
+  )
+
+  const getLinkStyle = useCallback((color?: string) => {
+    if (!color) return {}
+    const colors: Record<string, string> = {
+      purple: 'var(--color-neon-purple)',
+      pink: 'var(--color-neon-pink)',
+      green: 'var(--color-neon-green)',
+    }
+    return {
+      borderColor: colors[color],
+      color: colors[color],
+    }
+  }, [])
 
   return (
-    <nav className="backdrop-blur-md bg-opacity-80 shadow-lg border-b border-cyan-500/30 relative z-50"
-         style={{ background: 'rgba(10, 10, 15, 0.9)' }}>
+    <nav
+      className="backdrop-blur-md bg-opacity-80 shadow-lg border-b border-cyan-500/30 relative z-50"
+      style={{ background: 'rgba(10, 10, 15, 0.9)' }}
+    >
       <div className="w-full px-3 sm:px-4 lg:px-6">
         <div className="flex items-center justify-between h-14 sm:h-16">
-          {/* Logo */}
           <div className="flex-shrink-0">
             <Link to="/" className="text-lg sm:text-2xl font-bold tracking-wider neon-text float-animation">
               &lt;SC&gt;
             </Link>
           </div>
 
-          {/* Desktop Navigation - Scrollable on medium screens */}
           <div className="hidden lg:flex flex-1 items-center justify-center px-4">
             <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-thin">
               <Link to="/" className="cyber-btn text-xs px-2 py-1.5 whitespace-nowrap">
                 Home
               </Link>
-              <Link to="/projects" className="cyber-btn text-xs px-2 py-1.5 whitespace-nowrap">
-                Projects
-              </Link>
-              <Link to="/documents" className="cyber-btn text-xs px-2 py-1.5 whitespace-nowrap" style={{ borderColor: 'var(--color-neon-purple)', color: 'var(--color-neon-purple)' }}>
-                Docs
-              </Link>
-              <Link to="/agents" className="cyber-btn text-xs px-2 py-1.5 whitespace-nowrap" style={{ borderColor: 'var(--color-neon-pink)', color: 'var(--color-neon-pink)' }}>
-                Agents
-              </Link>
-              <Link to="/editor" className="cyber-btn text-xs px-2 py-1.5 whitespace-nowrap">
-                Editor
-              </Link>
-              <Link to="/generate" className="cyber-btn text-xs px-2 py-1.5 whitespace-nowrap">
-                Generate
-              </Link>
-              <Link to="/review" className="cyber-btn text-xs px-2 py-1.5 whitespace-nowrap">
-                Review
-              </Link>
+              {navLinks.map((link) => (
+                <Link
+                  key={link.to}
+                  to={link.to}
+                  className="cyber-btn text-xs px-2 py-1.5 whitespace-nowrap"
+                  style={getLinkStyle(link.color)}
+                  onMouseEnter={() => handleMouseEnter(link.preload)}
+                >
+                  {link.label}
+                </Link>
+              ))}
             </div>
           </div>
 
-          {/* User Actions */}
           <div className="hidden lg:flex items-center gap-1.5">
             {isAuthenticated ? (
               <>
-                <Link to="/profile" className="cyber-btn text-xs px-2 py-1.5 whitespace-nowrap" style={{ borderColor: 'var(--color-neon-green)', color: 'var(--color-neon-green)' }}>
+                <Link
+                  to="/profile"
+                  className="cyber-btn text-xs px-2 py-1.5 whitespace-nowrap"
+                  style={getLinkStyle('green')}
+                >
                   Profile
                 </Link>
                 <button
                   onClick={logout}
                   className="cyber-btn text-xs px-2 py-1.5 whitespace-nowrap"
-                  style={{ borderColor: 'var(--color-neon-pink)', color: 'var(--color-neon-pink)' }}
+                  style={getLinkStyle('pink')}
                 >
                   Logout
                 </button>
@@ -108,7 +173,7 @@ function Navbar() {
                 <Link
                   to="/register"
                   className="cyber-btn text-xs px-3 py-1.5"
-                  style={{ borderColor: 'var(--color-neon-green)', color: 'var(--color-neon-green)' }}
+                  style={getLinkStyle('green')}
                 >
                   Register
                 </Link>
@@ -116,7 +181,6 @@ function Navbar() {
             )}
           </div>
 
-          {/* Mobile menu button */}
           <div className="lg:hidden flex items-center gap-2">
             {isAuthenticated && (
               <span className="text-xs text-cyan-300 px-2 py-1 border border-cyan-500/30 rounded max-w-20 truncate">
@@ -133,97 +197,48 @@ function Navbar() {
         </div>
       </div>
 
-      {/* Mobile Menu */}
       {mobileMenuOpen && (
         <div className="lg:hidden" style={{ background: 'rgba(10, 10, 15, 0.98)' }}>
           <div className="px-3 pt-2 pb-4 space-y-1">
-            <Link
-              to="/"
-              className="block cyber-btn text-xs px-3 py-2 w-full text-left"
-              onClick={() => setMobileMenuOpen(false)}
-            >
+            <Link to="/" className="block cyber-btn text-xs px-3 py-2 w-full text-left">
               Home
             </Link>
-            <Link
-              to="/projects"
-              className="block cyber-btn text-xs px-3 py-2 w-full text-left"
-              onClick={() => setMobileMenuOpen(false)}
-            >
-              Projects
-            </Link>
-            <Link
-              to="/documents"
-              className="block cyber-btn text-xs px-3 py-2 w-full text-left"
-              style={{ borderColor: 'var(--color-neon-purple)', color: 'var(--color-neon-purple)' }}
-              onClick={() => setMobileMenuOpen(false)}
-            >
-              Documents
-            </Link>
-            <Link
-              to="/agents"
-              className="block cyber-btn text-xs px-3 py-2 w-full text-left"
-              style={{ borderColor: 'var(--color-neon-pink)', color: 'var(--color-neon-pink)' }}
-              onClick={() => setMobileMenuOpen(false)}
-            >
-              Agents
-            </Link>
-            <Link
-              to="/editor"
-              className="block cyber-btn text-xs px-3 py-2 w-full text-left"
-              onClick={() => setMobileMenuOpen(false)}
-            >
-              Editor
-            </Link>
-            <Link
-              to="/generate"
-              className="block cyber-btn text-xs px-3 py-2 w-full text-left"
-              onClick={() => setMobileMenuOpen(false)}
-            >
-              Generate
-            </Link>
-            <Link
-              to="/review"
-              className="block cyber-btn text-xs px-3 py-2 w-full text-left"
-              onClick={() => setMobileMenuOpen(false)}
-            >
-              Review
-            </Link>
-            {isAuthenticated && (
+            {navLinks.map((link) => (
+              <Link
+                key={link.to}
+                to={link.to}
+                className="block cyber-btn text-xs px-3 py-2 w-full text-left"
+                style={getLinkStyle(link.color)}
+              >
+                {link.label}
+              </Link>
+            ))}
+            {isAuthenticated ? (
               <>
                 <Link
                   to="/profile"
                   className="block cyber-btn text-xs px-3 py-2 w-full text-left"
-                  style={{ borderColor: 'var(--color-neon-green)', color: 'var(--color-neon-green)' }}
-                  onClick={() => setMobileMenuOpen(false)}
+                  style={getLinkStyle('green')}
                 >
                   Profile
                 </Link>
                 <button
-                  onClick={() => {
-                    logout()
-                    setMobileMenuOpen(false)
-                  }}
+                  onClick={() => logout()}
                   className="block cyber-btn text-xs px-3 py-2 w-full text-left"
-                  style={{ borderColor: 'var(--color-neon-pink)', color: 'var(--color-neon-pink)' }}
+                  style={getLinkStyle('pink')}
                 >
                   Logout
                 </button>
               </>
-            )}
-            {!isAuthenticated && (
+            ) : (
               <>
-                <Link
-                  to="/login"
-                  className="block cyber-btn text-xs px-3 py-2 w-full text-left"
-                  onClick={() => setMobileMenuOpen(false)}
-                >
+                <Link to="/login" className="block cyber-btn text-xs px-3 py-2 w-full text-left">
                   Login
                 </Link>
                 <Link
                   to="/register"
                   className="block cyber-btn text-xs px-3 py-2 w-full text-left"
-                  style={{ borderColor: 'var(--color-neon-green)', color: 'var(--color-neon-green)' }}
-                  onClick={() => setMobileMenuOpen(false)}
+                  style={getLinkStyle('green')}
                 >
                   Register
                 </Link>
@@ -234,9 +249,10 @@ function Navbar() {
       )}
     </nav>
   )
-}
+})
 
-function HomePage() {
+// Home page component
+const HomePage = React.memo(function HomePage() {
   const { isAuthenticated } = useAuth()
 
   return (
@@ -274,9 +290,7 @@ function HomePage() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-5xl mx-auto px-4">
         <div className="cyber-card p-8 float-animation" style={{ animationDelay: '0s' }}>
           <div className="text-4xl mb-4">{'</>'}</div>
-          <h3 className="text-2xl font-semibold neon-text mb-4 tracking-wider">
-            CODE EDITOR
-          </h3>
+          <h3 className="text-2xl font-semibold neon-text mb-4 tracking-wider">CODE EDITOR</h3>
           <p className="text-gray-400 leading-relaxed">
             Advanced code editor powered by Monaco with syntax highlighting and intelligent completion
           </p>
@@ -285,9 +299,7 @@ function HomePage() {
 
         <div className="cyber-card p-8 float-animation" style={{ animationDelay: '0.5s' }}>
           <div className="text-4xl mb-4">{'<AI>'}</div>
-          <h3 className="text-2xl font-semibold neon-text-purple mb-4 tracking-wider">
-            AI GENERATION
-          </h3>
+          <h3 className="text-2xl font-semibold neon-text-purple mb-4 tracking-wider">AI GENERATION</h3>
           <p className="text-gray-400 leading-relaxed">
             Generate intelligent code using advanced LangGraph Agents with multi-step reasoning
           </p>
@@ -320,8 +332,9 @@ function HomePage() {
       </div>
     </div>
   )
-}
+})
 
+// App content with routes
 function AppContent() {
   return (
     <div className="min-h-screen relative overflow-hidden">
@@ -329,20 +342,24 @@ function AppContent() {
       <div className="relative z-10">
         <Navbar />
         <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
-          <Routes>
-            <Route path="/" element={<HomePage />} />
-            <Route path="/projects" element={<ProjectsPage />} />
-            <Route path="/documents" element={<DocumentsPage />} />
-            <Route path="/documents/:id" element={<DocumentEditorPage />} />
-            <Route path="/documents/:id/edit" element={<DocumentEditorPage />} />
-            <Route path="/agents" element={<AgentsPage />} />
-            <Route path="/profile" element={<ProfilePage />} />
-            <Route path="/editor" element={<EditorPage />} />
-            <Route path="/generate" element={<CodeGenPage />} />
-            <Route path="/review" element={<CodeGenPage />} />
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/register" element={<RegisterPage />} />
-          </Routes>
+          <Suspense fallback={<LoadingPage message="Loading page..." />}>
+            <Routes>
+              <Route path="/" element={<HomePage />} />
+              <Route path="/projects" element={<ProjectsPage />} />
+              <Route path="/documents" element={<DocumentsPage />} />
+              <Route path="/documents/:id" element={<DocumentEditorPage />} />
+              <Route path="/documents/:id/edit" element={<DocumentEditorPage />} />
+              <Route path="/agents" element={<AgentsPage />} />
+              <Route path="/agents/:id/chat" element={<AgentChatPage />} />
+              <Route path="/code-analysis" element={<CodeAnalysisPage />} />
+              <Route path="/profile" element={<ProfilePage />} />
+              <Route path="/editor" element={<EditorPage />} />
+              <Route path="/generate" element={<CodeGenPage />} />
+              <Route path="/review" element={<CodeGenPage />} />
+              <Route path="/login" element={<LoginPage />} />
+              <Route path="/register" element={<RegisterPage />} />
+            </Routes>
+          </Suspense>
         </main>
       </div>
     </div>

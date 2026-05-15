@@ -105,3 +105,6 @@ temp/
 
 # === Claude ===
 .claude/
+
+# === Trae ===
+.trae/

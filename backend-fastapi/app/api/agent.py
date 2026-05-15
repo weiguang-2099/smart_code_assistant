@@ -3,94 +3,43 @@ AI Agent API Routes - LangChain Agent 端点
 
 提供基于 LangChain 的智能 Agent 服务，支持代码生成、审查、分析等功能
 """
+import asyncio
+import hashlib
+import re
+import logging
 from typing import Optional, List, Dict, Any
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from pydantic import BaseModel, Field
 
 from app.database import get_db
 from app.core.deps import get_current_user
+from app.core.cache import global_cache_manager
 from app.models.user import User
 from app.services.langchain_glm_service import langchain_glm_service
-from app.services.code_tools import langchain_tools
+from app.services.code_tools import (
+    langchain_tools_dict,
+    get_tool,
+    CodeToolName,
+    tool_descriptions,
+)
+from app.services.conversation_manager import conversation_manager
+from app.schemas.agent import (
+    AgentAnalyzeRequest,
+    AgentAnalyzeResponse,
+    AgentGenerateRequest,
+    AgentGenerateResponse,
+    AgentReviewRequest,
+    AgentReviewResponse,
+    AgentChatRequest,
+    AgentChatResponse,
+)
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
-
-# ============================================================================
-# Request/Response Schemas
-# ============================================================================
-
-class AgentAnalyzeRequest(BaseModel):
-    """Agent 代码分析请求"""
-    code: str = Field(..., description="要分析的代码")
-    language: str = Field(default="python", description="编程语言")
-    focus_areas: Optional[List[str]] = Field(
-        default=None,
-        description="关注领域: structure, smells, complexity, security, all"
-    )
-
-
-class AgentAnalyzeResponse(BaseModel):
-    """Agent 代码分析响应"""
-    analysis: str = Field(..., description="分析结果")
-    structure: Optional[str] = Field(None, description="代码结构")
-    smells: Optional[str] = Field(None, description="代码坏味道")
-    complexity: Optional[str] = Field(None, description="复杂度分析")
-    security: Optional[str] = Field(None, description="安全问题")
-    recommendations: List[str] = Field(default_factory=list, description="改进建议")
-
-
-class AgentGenerateRequest(BaseModel):
-    """Agent 代码生成请求"""
-    prompt: str = Field(..., description="需求描述")
-    language: str = Field(default="python", description="目标编程语言")
-    context: Optional[str] = Field(None, description="上下文信息")
-    use_tools: bool = Field(default=False, description="是否使用工具分析")
-
-
-class AgentGenerateResponse(BaseModel):
-    """Agent 代码生成响应"""
-    code: str = Field(..., description="生成的代码")
-    explanation: str = Field(..., description="代码说明")
-    analysis: Optional[str] = Field(None, description="代码分析（如果使用工具）")
-
-
-class AgentReviewRequest(BaseModel):
-    """Agent 代码审查请求"""
-    code: str = Field(..., description="要审查的代码")
-    language: str = Field(default="python", description="编程语言")
-    deep_analysis: bool = Field(default=True, description="是否进行深度分析")
-
-
-class AgentReviewResponse(BaseModel):
-    """Agent 代码审查响应"""
-    overall_score: int = Field(..., description="总体评分 (0-100)")
-    summary: str = Field(..., description="审查摘要")
-    structure: Optional[str] = Field(None, description="结构分析")
-    issues: List[str] = Field(default_factory=list, description="发现的问题")
-    suggestions: List[str] = Field(default_factory=list, description="改进建议")
-    security_issues: List[str] = Field(default_factory=list, description="安全问题")
-    improved_code: Optional[str] = Field(None, description="改进后的代码")
-
-
-class AgentChatRequest(BaseModel):
-    """Agent 聊天请求"""
-    message: str = Field(..., description="用户消息")
-    history: Optional[List[Dict[str, str]]] = Field(
-        default_factory=list,
-        description="对话历史"
-    )
-    language: str = Field(default="python", description="编程语言")
-
-
-class AgentChatResponse(BaseModel):
-    """Agent 聊天响应"""
-    response: str = Field(..., description="Agent 响应")
-    code_blocks: List[Dict[str, str]] = Field(
-        default_factory=list,
-        description="提取的代码块"
-    )
+TOOL_TIMEOUT_SECONDS = 5.0
+TOOL_CACHE_TTL = 300
 
 
 # ============================================================================
@@ -99,25 +48,57 @@ class AgentChatResponse(BaseModel):
 
 async def run_tool_analysis(code: str, language: str) -> Dict[str, str]:
     """
-    运行所有工具进行分析
+    并行运行所有分析工具，带超时控制和缓存。
 
     Args:
         code: 要分析的代码
         language: 编程语言
 
     Returns:
-        各工具的分析结果
+        工具名称 -> 分析结果的字典
     """
-    results = {}
+    cache_key = f"tool_analysis:{hashlib.sha256(f'{code}:{language}'.encode()).hexdigest()[:32]}"
 
-    for tool in langchain_tools:
+    cached_result = await global_cache_manager.get(cache_key)
+    if cached_result is not None:
+        logger.debug(f"Tool analysis cache hit for {cache_key[:16]}")
+        return cached_result
+
+    tool_names = [
+        CodeToolName.ANALYZE_STRUCTURE,
+        CodeToolName.DETECT_SMELLS,
+        CodeToolName.CALCULATE_COMPLEXITY,
+        CodeToolName.CHECK_SECURITY,
+    ]
+
+    tools = []
+    for name in tool_names:
+        tool = get_tool(name)
+        if tool:
+            tools.append(tool)
+
+    async def run_tool_with_timeout(tool) -> tuple:
+        """Run a single tool with timeout control."""
         try:
-            if tool.name == "search_code_pattern":
-                continue  # 跳过搜索工具
-            result = tool.invoke({"code": code, "language": language})
-            results[tool.name] = result
+            result = await asyncio.wait_for(
+                asyncio.to_thread(tool.invoke, {"code": code, "language": language}),
+                timeout=TOOL_TIMEOUT_SECONDS
+            )
+            return tool.name, result
+        except asyncio.TimeoutError:
+            logger.warning(f"Tool {tool.name} timed out after {TOOL_TIMEOUT_SECONDS}s")
+            return tool.name, f"分析超时（>{TOOL_TIMEOUT_SECONDS}s）"
         except Exception as e:
-            results[tool.name] = f"分析失败: {str(e)}"
+            logger.error(f"Tool {tool.name} failed: {e}")
+            return tool.name, f"分析失败: {str(e)}"
+
+    tasks = [run_tool_with_timeout(tool) for tool in tools]
+    results_list = await asyncio.gather(*tasks)
+
+    results = {name: result for name, result in results_list}
+
+    await global_cache_manager.set(cache_key, results, ttl=TOOL_CACHE_TTL)
+    logger.debug(f"Tool analysis cached for {cache_key[:16]}")
 
     return results
 
@@ -157,37 +138,36 @@ async def agent_analyze(
     运行所有分析工具并返回综合报告
     """
     try:
-        # 确定要使用的工具
-        focus_areas = request.focus_areas or ["structure", "smells", "complexity", "security"]
+        # 确定要使用的工具（focus_area -> tool_name 映射）
+        focus_to_tool = {
+            "structure": CodeToolName.ANALYZE_STRUCTURE,
+            "smells": CodeToolName.DETECT_SMELLS,
+            "complexity": CodeToolName.CALCULATE_COMPLEXITY,
+            "security": CodeToolName.CHECK_SECURITY,
+        }
 
-        results = {}
+        focus_areas = request.focus_areas or list(focus_to_tool.keys())
         code = request.code
         language = request.language
 
-        # 运行请求的工具
-        if "all" in focus_areas or "structure" in focus_areas:
-            try:
-                results["structure"] = langchain_tools[0].invoke({"code": code, "language": language})
-            except Exception as e:
-                results["structure"] = f"结构分析失败: {str(e)}"
+        results = {}
 
-        if "all" in focus_areas or "smells" in focus_areas:
-            try:
-                results["smells"] = langchain_tools[1].invoke({"code": code, "language": language})
-            except Exception as e:
-                results["smells"] = f"坏味道检测失败: {str(e)}"
+        # 使用字典访问工具，避免硬编码索引
+        for area in focus_areas:
+            if area == "all":
+                # 并行执行所有工具
+                results = await run_tool_analysis(code, language)
+                break
 
-        if "all" in focus_areas or "complexity" in focus_areas:
-            try:
-                results["complexity"] = langchain_tools[2].invoke({"code": code, "language": language})
-            except Exception as e:
-                results["complexity"] = f"复杂度分析失败: {str(e)}"
-
-        if "all" in focus_areas or "security" in focus_areas:
-            try:
-                results["security"] = langchain_tools[3].invoke({"code": code, "language": language})
-            except Exception as e:
-                results["security"] = f"安全检测失败: {str(e)}"
+            tool_name = focus_to_tool.get(area)
+            if tool_name:
+                tool = get_tool(tool_name)
+                if tool:
+                    try:
+                        results[area] = tool.invoke({"code": code, "language": language})
+                    except Exception as e:
+                        results[area] = f"{area}分析失败: {str(e)}"
+                        logger.error(f"Tool {tool_name} failed: {e}")
 
         # 使用 AI 生成综合分析
         analysis_text = format_agent_analysis(results)
@@ -227,6 +207,7 @@ async def agent_analyze(
         )
 
     except Exception as e:
+        logger.error(f"Agent analysis failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Agent analysis failed: {str(e)}"
@@ -415,10 +396,10 @@ async def agent_chat(
     """
     与 Agent 进行对话
 
-    支持多轮对话，自动提取代码块
+    支持多轮对话，自动提取代码块，智能调用分析工具
     """
     try:
-        # 构建对话历史
+        # Build and compress conversation history
         conversation = []
         for msg in request.history:
             conversation.append({
@@ -426,15 +407,96 @@ async def agent_chat(
                 "content": msg.get("content", "")
             })
 
-        # 系统提示词
+        # Compress and truncate history to control tokens
+        compressed_history = conversation_manager.prepare_for_llm(
+            conversation,
+            max_tokens=3000  # Leave room for response
+        )
+
+        # 检测用户消息中的代码块
+        code_blocks_in_message = []
+        code_pattern = r'```(\w*)\n([\s\S]*?)```'
+        for match in re.finditer(code_pattern, request.message):
+            lang = match.group(1) or request.language
+            code = match.group(2)
+            code_blocks_in_message.append({"language": lang, "code": code})
+
+        # 工具调用结果
+        tool_results = []
+        message_lower = request.message.lower()
+
+        # 如果消息中有代码，自动进行基础分析
+        for code_block in code_blocks_in_message[:2]:  # 最多分析2个代码块
+            code = code_block["code"]
+            lang = code_block["language"]
+
+            # 检测用户意图，决定调用哪些工具（使用字典访问工具）
+            # 安全检查关键词
+            if any(kw in message_lower for kw in ["安全", "漏洞", "security", "vulnerability", "风险"]):
+                tool = get_tool(CodeToolName.CHECK_SECURITY)
+                if tool:
+                    try:
+                        result = tool.invoke({"code": code, "language": lang})
+                        tool_results.append(f"🔒 安全分析:\n{result}")
+                    except Exception as e:
+                        logger.warning(f"Security check failed: {e}")
+
+            # 代码坏味道检测
+            elif any(kw in message_lower for kw in ["坏味道", "重构", "smell", "refactor", "优化"]):
+                tool = get_tool(CodeToolName.DETECT_SMELLS)
+                if tool:
+                    try:
+                        result = tool.invoke({"code": code, "language": lang})
+                        tool_results.append(f"🔍 代码质量:\n{result}")
+                    except Exception as e:
+                        logger.warning(f"Smell detection failed: {e}")
+
+            # 结构分析（默认对较长代码执行）
+            elif len(code.split('\n')) > 10:
+                tool = get_tool(CodeToolName.ANALYZE_STRUCTURE)
+                if tool:
+                    try:
+                        result = tool.invoke({"code": code, "language": lang})
+                        tool_results.append(f"📊 结构分析:\n{result}")
+                    except Exception as e:
+                        logger.warning(f"Structure analysis failed: {e}")
+
+        # 语义搜索关键词
+        search_keywords = ["搜索", "查找", "找", "search", "find", "查询", "query"]
+        if any(kw in message_lower for kw in search_keywords) and not code_blocks_in_message:
+            # 提取搜索查询
+            search_query = request.message
+            for kw in search_keywords:
+                search_query = search_query.replace(kw, "").strip()
+            if len(search_query) > 3:
+                tool = get_tool(CodeToolName.SEARCH_SEMANTIC)
+                if tool:
+                    try:
+                        result = tool.invoke({
+                            "query": search_query,
+                            "project_id": 1,
+                            "top_k": 5
+                        })
+                        tool_results.append(f"🔎 语义搜索:\n{result}")
+                    except Exception as e:
+                        logger.warning(f"Semantic search failed: {e}")
+
+        # 构建系统提示词
         system_prompt = f"""你是一个专业的编程助手，精通 {request.language} 语言。
 提供清晰、准确的答案。
-显示代码时使用 markdown 代码块。"""
+显示代码时使用 markdown 代码块。
+
+如果提供了工具分析结果，请基于这些结果给出建议。"""
+
+        # 如果有工具结果，添加到用户消息
+        enhanced_message = request.message
+        if tool_results:
+            enhanced_message += "\n\n---\n📊 自动分析结果:\n" + "\n\n".join(tool_results)
 
         # 调用 AI
         response = await langchain_glm_service.chat_with_history(
-            user_message=request.message,
-            history=conversation,
+            user_message=enhanced_message,
+            history=compressed_history,  # Use compressed history
             system_prompt=system_prompt,
         )
 
@@ -458,6 +520,7 @@ async def agent_chat(
         )
 
     except Exception as e:
+        logger.error(f"Agent chat failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Agent chat failed: {str(e)}"
@@ -471,14 +534,12 @@ async def list_tools(
     """
     列出所有可用的 Agent 工具
     """
-    from app.services.code_tools import tool_descriptions
-
     return {
         "tools": [
             {
                 "name": name,
-                "description": tool_descriptions.get(name, ""),
+                "description": desc,
             }
-            for name in tool_descriptions.keys()
+            for name, desc in tool_descriptions.items()
         ]
     }
