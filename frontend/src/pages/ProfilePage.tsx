@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import BasicInfoTab from '../components/BasicInfoTab'
-import ContentManagementTab from '../components/ContentManagementTab'
 import PreferencesTab from '../components/PreferencesTab'
 import MyAgentsTab from '../components/MyAgentsTab'
 import TrainingTab from '../components/TrainingTab'

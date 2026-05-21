@@ -177,7 +177,9 @@ function DocumentEditorContent() {
                   if (!document?.current_version?.markdown_content) return
                   const blob = new Blob([document.current_version.markdown_content], { type: 'text/markdown' })
                   const url = URL.createObjectURL(blob)
-                  const a = document.createElement('a')
+                  // `document` in this scope shadows window.document with a
+                  // DocumentDetail variable - reach for the DOM API explicitly.
+                  const a = window.document.createElement('a')
                   a.href = url
                   a.download = `${document.title}.md`
                   a.click()

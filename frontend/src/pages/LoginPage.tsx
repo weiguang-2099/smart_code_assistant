@@ -18,15 +18,6 @@ interface LoginResponse {
   }
 }
 
-interface ErrorResponse {
-  success: boolean
-  error: {
-    code: string
-    message: string
-    details?: Record<string, unknown>
-  }
-}
-
 export default function LoginPage() {
   const navigate = useNavigate()
   const { login } = useAuth()

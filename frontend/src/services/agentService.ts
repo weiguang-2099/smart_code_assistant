@@ -8,7 +8,6 @@ import type {
   AgentUpdate,
   AgentStatusUpdate,
   AgentListResponse,
-  Conversation,
   ConversationDetail,
   ConversationCreate,
   ConversationListResponse,

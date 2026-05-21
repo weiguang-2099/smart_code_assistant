@@ -6,14 +6,12 @@ interface EditorToolbarProps {
 }
 
 export default function EditorToolbar({ editor }: EditorToolbarProps) {
+  // All hooks must be called unconditionally before any early return.
   const [showLinkInput, setShowLinkInput] = useState(false)
   const [linkUrl, setLinkUrl] = useState('')
 
-  if (!editor) {
-    return null
-  }
-
   const setLink = useCallback(() => {
+    if (!editor) return
     if (linkUrl) {
       editor.chain().focus().setLink({ href: linkUrl }).run()
     } else {
@@ -24,11 +22,16 @@ export default function EditorToolbar({ editor }: EditorToolbarProps) {
   }, [editor, linkUrl])
 
   const addImage = useCallback(() => {
+    if (!editor) return
     const url = window.prompt('Enter image URL:')
     if (url) {
       editor.chain().focus().setImage({ src: url }).run()
     }
   }, [editor])
+
+  if (!editor) {
+    return null
+  }
 
   const ToolbarButton = ({
     onClick,

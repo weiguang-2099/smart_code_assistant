@@ -369,7 +369,7 @@ function nodeToMarkdown(node: TipTapNode, indentLevel: number): string {
       return text ? `${indent}${text}` : ''
 
     case 'heading':
-      const level = node.attrs?.level || 1
+      const level = (node.attrs?.level as number | undefined) ?? 1
       const headingText = contentToText(content)
       return `${indent}${'#'.repeat(level)} ${headingText}`
 
@@ -387,7 +387,7 @@ function nodeToMarkdown(node: TipTapNode, indentLevel: number): string {
 
     case 'bulletList':
       return content
-        .map((child, idx) => {
+        .map((child, _idx) => {
           if (child.type === 'listItem') {
             const itemText = contentToText(child.content || [])
             return `${indent}- ${itemText}`

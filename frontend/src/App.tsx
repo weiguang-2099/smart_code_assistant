@@ -11,7 +11,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { ToastProvider } from './contexts/ToastContext'
 import ErrorBoundary from './components/ErrorBoundary'
 import { LoadingPage } from './components/common/Loading'
-import { Suspense, lazy, useEffect, useState, useCallback, useMemo } from 'react'
+import React, { Suspense, lazy, useEffect, useState, useCallback, useMemo } from 'react'
 
 // Lazy-loaded pages for code splitting
 const EditorPage = lazy(() => import('./pages/EditorPage'))

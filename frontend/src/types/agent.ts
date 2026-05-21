@@ -42,6 +42,7 @@ export interface AgentUpdate {
   avatar_url?: string
   system_prompt?: string
   config?: Record<string, unknown>
+  status?: AgentStatus
 }
 
 export interface AgentStatusUpdate {

@@ -257,7 +257,7 @@ export default function EditorPage() {
     }
   }
 
-  const showMessage = (msg: string, type: 'success' | 'error') => {
+  const showMessage = (msg: string, _type: 'success' | 'error') => {
     setMessage(msg)
     setTimeout(() => setMessage(''), 3000)
   }
@@ -417,7 +417,7 @@ export default function EditorPage() {
               </div>
               <CodeEditor
                 value={code}
-                onChange={setCode}
+                onChange={(value) => setCode(value ?? '')}
                 language={language}
                 theme="vs-dark"
                 height="500px"

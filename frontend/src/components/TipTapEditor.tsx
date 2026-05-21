@@ -63,7 +63,10 @@ export default function TipTapEditor({
     onUpdate: ({ editor }) => {
       if (onChange) {
         const json = editor.getJSON() as TipTapContent
-        const markdown = editor.storage.markdown || getMarkdownFromEditor(editor)
+        // editor.storage typing varies between TipTap extensions; markdown is
+        // populated only when @tiptap/extension-markdown is installed.
+        const storage = editor.storage as { markdown?: string }
+        const markdown = storage.markdown || getMarkdownFromEditor(editor)
         onChange(json, markdown)
       }
     },

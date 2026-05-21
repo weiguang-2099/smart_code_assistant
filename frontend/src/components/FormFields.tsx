@@ -1,4 +1,5 @@
-import React, { forwardRef, InputHTMLAttributes, TextareaHTMLAttributes, SelectHTMLAttributes } from 'react'
+import React, { forwardRef } from 'react'
+import type { InputHTMLAttributes, TextareaHTMLAttributes, SelectHTMLAttributes } from 'react'
 
 interface BaseFieldProps {
   label?: string

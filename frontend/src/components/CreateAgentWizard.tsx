@@ -59,7 +59,7 @@ export default function CreateAgentWizard({
       case 'basic':
         return formData.name.trim().length > 0
       case 'purpose':
-        return formData.description.trim().length > 0
+        return (formData.description ?? '').trim().length > 0
       case 'confirm':
         return true
       default:

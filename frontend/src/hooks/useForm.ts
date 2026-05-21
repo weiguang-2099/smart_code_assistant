@@ -48,7 +48,9 @@ interface UseFormReturn<T extends Record<string, unknown>> {
   handleSubmit: (e: React.FormEvent) => Promise<void>
   getFieldProps: <K extends keyof T>(field: K) => {
     name: K
-    value: T[K]
+    // Always serialised to string for the underlying <input>; getFieldProps
+    // is intended for binding into HTMLInputElement.value etc.
+    value: string
     onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => void
     onBlur: (e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => void
   }

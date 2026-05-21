@@ -19,7 +19,7 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 type StreamEventType = 'content' | 'error' | 'done' | 'heartbeat' | 'metadata' | 'tool_start' | 'tool_end'
 
-interface Message {
+export interface Message {
   role: 'user' | 'assistant' | 'system'
   content: string
 }
@@ -30,7 +30,7 @@ interface StreamMetadata {
   language?: string
 }
 
-interface StreamChatOptions {
+export interface StreamChatOptions {
   language?: string
   typewriterSpeed?: number
   maxRetries?: number
@@ -265,7 +265,7 @@ export const useStreamChat = () => {
                 }
                 if (parsed.id) {
                   currentId = parsed.id
-                  setState((prev) => ({ ...prev, lastEventId: parsed.id }))
+                  setState((prev) => ({ ...prev, lastEventId: parsed.id ?? null }))
                 }
               } else if (line.startsWith('data: ')) {
                 currentData = line.slice(6).trim()
