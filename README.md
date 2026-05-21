@@ -1,5 +1,11 @@
 # Smart Code Assistant
 
+[![CI](https://github.com/WeiGuang-2099/Smart_Code_Assistant/actions/workflows/ci.yml/badge.svg)](https://github.com/WeiGuang-2099/Smart_Code_Assistant/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/badge/backend%20coverage-60%25-brightgreen)](./backend-fastapi/htmlcov)
+[![Python](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/)
+[![React](https://img.shields.io/badge/react-19-61dafb.svg)](https://react.dev/)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
+
 An AI-powered code generation, review, and analysis platform built with FastAPI, React, and LangChain. Combines LLM-driven code intelligence with a code knowledge graph (GraphRAG) for deep structural understanding of your codebase.
 
 ## Features
@@ -51,34 +57,94 @@ An AI-powered code generation, review, and analysis platform built with FastAPI,
 | Graph DB | Neo4j 5.15 (code knowledge graph) |
 | Vector DB | ChromaDB (semantic search) |
 | Auth | JWT (access + refresh tokens), Argon2 password hashing |
-| Observability | OpenTelemetry, Jaeger, Prometheus metrics |
-| Deployment | Docker Compose |
+| Observability | OpenTelemetry, Jaeger, Prometheus metrics, Sentry (optional) |
+| Testing | pytest + pytest-cov (backend, 60%+ coverage), Vitest + RTL (frontend), k6 (HTTP load) |
+| Deployment | Docker Compose, GitHub Actions CI |
 
 ## Architecture
 
+```mermaid
+flowchart TB
+    subgraph Client["Client"]
+        UI["React 19 + Vite 7<br/>Monaco / TipTap / Tailwind"]
+    end
+
+    subgraph API["FastAPI Backend"]
+        direction TB
+        MW["Middleware<br/>JWT auth · rate limiting · OpenTelemetry · perf metrics"]
+        subgraph Services["Domain services"]
+            direction LR
+            Auth["Auth & Users<br/>(Argon2 + JWT rotate)"]
+            CodeGen["Code Gen / Review<br/>(LangChain agent)"]
+            Analyze["Static Analysis<br/>(AST + smells + security)"]
+            Docs["Documents<br/>(PDF -> MD + versions)"]
+            Graph["GraphRAG retriever<br/>(parallel semantic + graph)"]
+        end
+    end
+
+    subgraph Stores["Data stores"]
+        direction LR
+        MySQL["MySQL 8.0<br/>(business data)"]
+        Neo4j["Neo4j 5.15<br/>(code dependency graph)"]
+        Chroma["ChromaDB<br/>(code embeddings)"]
+    end
+
+    subgraph External["External"]
+        GLM["ZhipuAI GLM-4<br/>(via OpenAI-compatible API)"]
+        Datalab["Datalab Marker<br/>(PDF -> MD)"]
+    end
+
+    subgraph Obs["Observability"]
+        Jaeger["Jaeger<br/>(OTLP traces)"]
+        Prom["Prometheus<br/>(/metrics)"]
+        Sentry["Sentry<br/>(optional)"]
+    end
+
+    UI -- "HTTPS / SSE" --> MW
+    MW --> Services
+
+    Auth --> MySQL
+    CodeGen --> GLM
+    CodeGen --> Analyze
+    Docs --> MySQL
+    Docs --> Datalab
+    Analyze --> Graph
+    Graph --> Neo4j
+    Graph --> Chroma
+    Graph -. "embed" .-> GLM
+
+    API --> Jaeger
+    API --> Prom
+    API -.-> Sentry
 ```
-┌─────────────────────────────────────────────────────┐
-│                   React Frontend                     │
-│       (Monaco Editor, TipTap, Cyberpunk UI)         │
-└──────────────────────┬──────────────────────────────┘
-                       │  /api
-┌──────────────────────▼──────────────────────────────┐
-│                FastAPI Backend                       │
-│  ┌──────────┐ ┌──────────┐ ┌─────────────────────┐ │
-│  │ Auth &   │ │ Code Gen │ │  LangChain Agent    │ │
-│  │ Users    │ │ & Review │ │  (parallel tools)   │ │
-│  └──────────┘ └──────────┘ └─────────────────────┘ │
-│  ┌──────────┐ ┌──────────┐ ┌─────────────────────┐ │
-│  │ Document │ │  Code    │ │  Code Knowledge     │ │
-│  │ Mgmt     │ │ Analysis │ │  Graph (GraphRAG)   │ │
-│  └──────────┘ └──────────┘ └─────────────────────┘ │
-└───┬──────────────┬──────────────────┬───────────────┘
-    │              │                  │
-┌───▼───┐   ┌─────▼─────┐   ┌───────▼───────┐
-│ MySQL │   │   Neo4j   │   │   ChromaDB    │
-│  8.0  │   │   5.15    │   │  (vectors)    │
-└───────┘   └───────────┘   └───────────────┘
+
+### Key flows
+
+- **Streaming chat** — `POST /api/v1/agent/chat/stream` returns a typed SSE stream (`metadata` -> `content`* -> `tool_*` -> `done`) with heartbeat events and session-scoped metrics.
+- **Hybrid GraphRAG retrieval** — `CodeGraphRetriever.retrieve()` fans out a ChromaDB semantic query and a Neo4j subgraph traversal in parallel via `asyncio.gather`, then caches the merged result in the L1 LRU layer.
+- **Layered cache** — `CacheManager` is L1 (in-process LRU with TTL + LRU eviction) with an optional L2 Redis backend gated by `REDIS_URL`. The `@cached` decorator keys on stable hashes of the call arguments.
+- **Token revocation** — Logout pushes the token onto a deterministic-keyed in-memory blacklist; `revoke_all_user_tokens` bumps a per-user token version so every previously issued token fails decode without DB hit.
+
+## Performance
+
+Numbers from `python scripts/benchmark.py` on a developer laptop (no real Neo4j / ChromaDB / LLM - external stores mocked). All hot paths sit comfortably in the low-millisecond range so the request budget is dominated by the LLM call, not local orchestration.
+
+| Hot path | avg | p50 | p95 |
+|---|---:|---:|---:|
+| Static analysis pipeline (4 tools) | 1.4 ms | 1.3 ms | 2.8 ms |
+| GraphRAG retrieval (semantic + graph in parallel) | 0.6 ms | 0.5 ms | 0.9 ms |
+| Conversation compression (100-message history) | 0.01 ms | 0.01 ms | 0.02 ms |
+| AST parsing (260 lines of Python) | 2.1 ms | 2.1 ms | 2.2 ms |
+| LRU cache (1000 sequential GETs) | 0.5 ms | 0.5 ms | 0.5 ms |
+
+Re-run anytime with:
+
+```bash
+cd backend-fastapi
+python scripts/benchmark.py
 ```
+
+For HTTP-level load testing see [`load-tests/README.md`](./load-tests/README.md) (k6 scenarios with built-in latency/error-rate thresholds).
 
 ## Getting Started
 
@@ -174,6 +240,9 @@ Key configuration options (set in `backend-fastapi/.env`):
 | `CODE_GRAPH_EMBEDDING_MODEL` | Embedding model | `BAAI/bge-small-zh-v1.5` |
 | `RATE_LIMIT_GENERAL` | General rate limit | `100/minute` |
 | `RATE_LIMIT_LOGIN` | Login rate limit | `20/minute` |
+| `SENTRY_DSN` | Sentry DSN - error tracking disabled if blank | _(unset)_ |
+| `SENTRY_TRACES_SAMPLE_RATE` | Sentry performance sampling | `0.0` |
+| `VITE_SENTRY_DSN` | Frontend Sentry DSN - tracking disabled if blank | _(unset)_ |
 
 ## Project Structure
 
@@ -200,10 +269,91 @@ Smart_Code_Assistant/
 │       ├── pages/            # Page components
 │       ├── services/         # API client services
 │       └── types/            # TypeScript type definitions
-├── backend-dotnet/           # .NET backend (early stage)
 ├── docker-compose.yml        # Infrastructure services
 └── init-scripts/             # Database initialization SQL
 ```
+
+## Testing
+
+The backend has ~300 tests covering 60%+ of statements: auth, caching, rate
+limiting, alerting, query analysis, code-analysis tools, AST parsing, the
+GraphRAG builder, Markdown/TipTap conversion, and the optional Sentry layer.
+
+The frontend has 54+ tests (Vitest + Testing Library) covering the auth
+context, toast context, error boundary, empty-state primitives, loading
+skeletons, and Sentry initialisation.
+
+HTTP-level load testing lives under [`load-tests/`](./load-tests/) (k6
+scenarios with built-in latency/error-rate thresholds).
+
+### Run the backend tests locally
+
+```bash
+cd backend-fastapi
+
+# install dev dependencies (includes pytest, pytest-asyncio, pytest-cov)
+pip install -r requirements.txt
+
+# run the full suite with coverage
+pytest
+
+# faster: skip the coverage instrumentation
+pytest --no-cov
+
+# generate an HTML coverage report (written to htmlcov/)
+pytest --cov --cov-report=html
+open htmlcov/index.html
+```
+
+### Lint the backend
+
+```bash
+cd backend-fastapi
+pip install ruff
+ruff check app tests
+```
+
+### Run the frontend tests locally
+
+```bash
+cd frontend
+npm install
+
+# single run, CI-style
+npm test
+
+# watch mode while developing
+npm run test:watch
+
+# generate coverage report (writes to coverage/)
+npm run test:coverage
+```
+
+### HTTP load tests
+
+```bash
+# install k6 first - https://k6.io/docs/get-started/installation/
+
+# 30s smoke test
+k6 run load-tests/smoke.js
+
+# 3-min baseline against the seeded demo user
+k6 run load-tests/baseline.js
+```
+
+See [`load-tests/README.md`](./load-tests/README.md) for the full scenario
+catalogue and the embedded thresholds.
+
+### Continuous integration
+
+Every push and pull request to `main` runs the [CI workflow](.github/workflows/ci.yml):
+
+| Job | Steps |
+|-----|-------|
+| `backend` | `ruff check` -> `pytest --cov --cov-fail-under=55` -> uploads HTML report + Codecov XML |
+| `frontend` | `npm ci` -> `npm run lint` -> `tsc --noEmit` -> `npm test` -> `npm run build` |
+
+Builds fail if backend coverage drops below 55% or any lint / type / test step regresses.
 
 ## License
 
