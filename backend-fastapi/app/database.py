@@ -10,8 +10,12 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# In testing/CI environments DATABASE_URL may be empty; provide a fallback so
+# that create_async_engine() does not crash on module import.
+_db_url = settings.DATABASE_URL or "sqlite+aiosqlite:///./test.db"
+
 engine = create_async_engine(
-    settings.DATABASE_URL,
+    _db_url,
     echo=settings.FASTAPI_ENV == "development",
     pool_pre_ping=True,
     pool_size=10,

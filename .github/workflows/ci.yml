@@ -43,6 +43,7 @@ jobs:
       - name: Run tests with coverage
         env:
           FASTAPI_ENV: testing
+          DATABASE_URL: mysql+aiomysql://ci:ci@localhost:3306/ci_test
           SECRET_KEY: ci-secret-key-for-tests-only
           ZHIPUAI_API_KEY: ci-test-key
           DATALAB_API_KEY: ci-test-key
