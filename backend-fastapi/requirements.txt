@@ -35,3 +35,5 @@ opentelemetry-api>=1.20.0
 opentelemetry-sdk>=1.20.0
 opentelemetry-exporter-otlp>=1.20.0
 opentelemetry-exporter-jaeger>=1.20.0
+# Sentry (optional - only initialised if SENTRY_DSN is set)
+sentry-sdk[fastapi]>=2.0.0

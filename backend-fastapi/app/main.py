@@ -8,6 +8,7 @@ from app.core.performance_middleware import setup_performance_monitoring, metric
 from app.core.telemetry import setup_telemetry, shutdown_telemetry
 from app.core.alerting import performance_monitor, alert_manager, AlertRule, AlertType, AlertSeverity
 from app.core.query_analyzer import query_analyzer
+from app.core.sentry import init_sentry
 from app.api.health import router as health_router
 from app.api.auth import router as auth_router
 from app.api.projects import router as projects_router
@@ -28,6 +29,9 @@ from app.api.agent_stream import router as agent_stream_router
 async def lifespan(app: FastAPI):
     """Application lifespan manager for startup/shutdown events."""
     from app.database import enable_query_monitoring
+
+    # No-op when SENTRY_DSN is unset.
+    init_sentry()
 
     otlp_endpoint = getattr(settings, 'OTLP_ENDPOINT', None)
     jaeger_host = getattr(settings, 'JAEGER_HOST', None)
