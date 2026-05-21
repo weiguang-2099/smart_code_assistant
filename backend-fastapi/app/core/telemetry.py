@@ -71,19 +71,19 @@ def setup_telemetry(
             _tracer_provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
             logger.info(f"OTLP exporter configured: {otlp_endpoint}")
         except ImportError:
-            logger.warning("OTLP exporter not available, install opentelemetry-exporter-otlp")
+            logger.warning("OTLP exporter not available, install opentelemetry-exporter-otlp-proto-grpc")
 
     if jaeger_host:
         try:
-            from opentelemetry.exporter.jaeger.thrift import JaegerExporter
+            from opentelemetry.exporter.jaeger.proto.grpc import JaegerExporter
             jaeger_exporter = JaegerExporter(
-                agent_host_name=jaeger_host,
-                agent_port=jaeger_port,
+                host=jaeger_host,
+                port=jaeger_port,
             )
             _tracer_provider.add_span_processor(BatchSpanProcessor(jaeger_exporter))
             logger.info(f"Jaeger exporter configured: {jaeger_host}:{jaeger_port}")
         except ImportError:
-            logger.warning("Jaeger exporter not available, install opentelemetry-exporter-jaeger")
+            logger.warning("Jaeger exporter not available, install opentelemetry-exporter-jaeger-proto-grpc")
 
     if not otlp_endpoint and not jaeger_host:
         from opentelemetry.sdk.trace.export import ConsoleSpanExporter
