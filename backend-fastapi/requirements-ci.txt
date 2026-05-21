@@ -19,7 +19,7 @@ httpx==0.27.2
 zhipuai>=2.1.5
 # LangChain dependencies - pinned to avoid slow dependency resolution
 langchain==0.3.2
-langchain-openai==0.2.15
+langchain-openai==0.2.14
 langchain-core==0.3.29
 langgraph==0.2.39
 langchain-community==0.3.16
