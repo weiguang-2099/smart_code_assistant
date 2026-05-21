@@ -27,11 +27,10 @@ class TokenBlacklist:
         self._cleanup_interval = 100  # Clean up every N operations
         self._operation_count = 0
 
-    def _generate_jti(self, token: str, user_id: int) -> str:
-        """Generate a unique identifier for the token."""
-        # Use hash of token + user_id as JTI for uniqueness
-        data = f"{token}:{user_id}:{datetime.utcnow().isoformat()}"
-        return hashlib.sha256(data.encode()).hexdigest()[:32]
+    @staticmethod
+    def _token_key(token: str, user_id: int) -> str:
+        """Deterministic lookup key derived from token + user_id."""
+        return hashlib.sha256(f"{token}:{user_id}".encode()).hexdigest()[:32]
 
     def add(self, token: str, user_id: int, expires_at: datetime) -> str:
         """
@@ -43,45 +42,28 @@ class TokenBlacklist:
             expires_at: When the token expires (for cleanup)
 
         Returns:
-            The JTI (unique identifier) for the blacklisted token
+            The storage key for the blacklisted token
         """
-        jti = self._generate_jti(token, user_id)
+        key = self._token_key(token, user_id)
 
         with self._lock:
-            self._blacklist[jti] = expires_at
+            self._blacklist[key] = expires_at
             self._operation_count += 1
-            logger.info(f"Token blacklisted for user {user_id}, jti={jti[:8]}...")
+            logger.info(f"Token blacklisted for user {user_id}, key={key[:8]}...")
 
-            # Periodic cleanup
             if self._operation_count % self._cleanup_interval == 0:
                 self._cleanup()
 
-        return jti
+        return key
 
     def is_blacklisted(self, token: str, user_id: int) -> bool:
         """
-        Check if a token is blacklisted.
-
-        Args:
-            token: The JWT token string
-            user_id: The user ID associated with the token
-
-        Returns:
-            True if the token is blacklisted, False otherwise
+        Check if a token is blacklisted (and not yet expired).
         """
-        # We need to check all possible JTIs for this token
-        # Since we include timestamp in JTI generation, we check by partial match
+        key = self._token_key(token, user_id)
         with self._lock:
-            # For simplicity, we store a mapping of token_hash -> jtis
-            # This is a simplified check - in production, use Redis with token hash
-            token_hash = hashlib.sha256(f"{token}:{user_id}".encode()).hexdigest()[:32]
-
-            # Check if any jti starting with this hash exists and is not expired
-            now = datetime.utcnow()
-            for jti, exp in self._blacklist.items():
-                if jti.startswith(token_hash[:16]) and exp > now:
-                    return True
-            return False
+            exp = self._blacklist.get(key)
+            return exp is not None and exp > datetime.utcnow()
 
     def revoke_all_user_tokens(self, user_id: int) -> int:
         """

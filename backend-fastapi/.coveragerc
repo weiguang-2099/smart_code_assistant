@@ -1,0 +1,37 @@
+[run]
+source = app
+branch = True
+omit =
+    app/__init__.py
+    app/main.py
+    app/database.py
+    app/api/__init__.py
+    app/services/__init__.py
+    app/core/__init__.py
+    app/models/__init__.py
+    app/schemas/__init__.py
+    */migrations/*
+    */alembic/*
+    */tests/*
+    */venv/*
+
+[report]
+precision = 1
+show_missing = True
+skip_covered = False
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    def __str__
+    raise AssertionError
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    if TYPE_CHECKING:
+    @abstractmethod
+    \.\.\.
+
+[html]
+directory = htmlcov
+
+[xml]
+output = coverage.xml

@@ -1,0 +1,32 @@
+# Ruff configuration - minimal, additive checks that catch real problems
+# without forcing a stylistic refactor of the existing codebase.
+
+target-version = "py311"
+line-length = 120
+
+exclude = [
+    ".git",
+    "venv",
+    "__pycache__",
+    "alembic",
+    "migrations",
+    "build",
+    "dist",
+    "htmlcov",
+]
+
+[lint]
+# Start with the must-fix categories; broader stylistic rules can be opted in later.
+select = [
+    "E9",   # syntax errors
+    "F63",  # invalid comparisons
+    "F7",   # syntax / indentation
+    "F82",  # undefined names
+    "W291", # trailing whitespace
+    "W292", # no newline at end of file
+]
+
+ignore = []
+
+[lint.per-file-ignores]
+"tests/*" = ["E501"]  # long lines in test data are fine

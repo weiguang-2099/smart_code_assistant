@@ -344,16 +344,14 @@ class FormatConvertService:
             items = []
             for child in content:
                 if child.get("type") == "listItem":
-                    item_text = self._content_to_text(child.get("content", []))
-                    items.append(f"{indent}- {item_text}")
+                    items.append(f"{indent}- {self._render_list_item(child)}")
             return "\n".join(items)
 
         elif node_type == "orderedList":
             items = []
             for idx, child in enumerate(content, 1):
                 if child.get("type") == "listItem":
-                    item_text = self._content_to_text(child.get("content", []))
-                    items.append(f"{indent}{idx}. {item_text}")
+                    items.append(f"{indent}{idx}. {self._render_list_item(child)}")
             return "\n".join(items)
 
         elif node_type == "horizontalRule":
@@ -365,6 +363,20 @@ class FormatConvertService:
         else:
             # Default: treat as text
             return self._content_to_text(content)
+
+    def _render_list_item(self, list_item: Dict[str, Any]) -> str:
+        """
+        Unwrap a listItem's inner content. md_to_tiptap wraps each item in a
+        paragraph, so we recurse one level rather than treating the paragraph
+        as opaque text.
+        """
+        parts = []
+        for nested in list_item.get("content", []):
+            if nested.get("type") == "paragraph":
+                parts.append(self._content_to_text(nested.get("content", [])))
+            else:
+                parts.append(self._content_to_text([nested]))
+        return " ".join(p for p in parts if p)
 
     def _content_to_text(self, content: List[Dict[str, Any]], preserve_newlines: bool = False) -> str:
         """Convert content nodes to plain text with inline formatting."""

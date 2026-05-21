@@ -366,14 +366,23 @@ class CacheManager:
         self,
         key: str,
         value: Any,
+        ttl: Optional[int] = None,
         l1_ttl: Optional[int] = None,
         l2_ttl: Optional[int] = None,
     ) -> bool:
-        """Set value in both L1 and L2 caches."""
-        await self._l1.set(key, value, l1_ttl)
+        """
+        Set value in both L1 and L2 caches.
+
+        Pass `ttl` to apply the same expiry to both layers (the common case);
+        pass `l1_ttl` / `l2_ttl` to override per layer.
+        """
+        effective_l1 = l1_ttl if l1_ttl is not None else ttl
+        effective_l2 = l2_ttl if l2_ttl is not None else ttl
+
+        await self._l1.set(key, value, effective_l1)
 
         if self._l2:
-            await self._l2.set(key, value, l2_ttl)
+            await self._l2.set(key, value, effective_l2)
 
         return True
 
