@@ -7,13 +7,17 @@ import logging
 from typing import Optional, List, Dict, Any
 from functools import lru_cache
 
-import chromadb
-from chromadb.config import Settings as ChromaSettings
-from chromadb.utils import embedding_functions
-
 from app.services.code_graph.config import CodeGraphConfig, code_graph_config
 
 logger = logging.getLogger(__name__)
+
+
+def _import_chromadb():
+    """Lazy-import chromadb to avoid pulling in heavy deps (torch, onnxruntime) at module load."""
+    import chromadb
+    from chromadb.config import Settings as ChromaSettings
+    from chromadb.utils import embedding_functions
+    return chromadb, ChromaSettings, embedding_functions
 
 
 class ChromaDBClient:
@@ -21,9 +25,9 @@ class ChromaDBClient:
 
     def __init__(self, config: Optional[CodeGraphConfig] = None):
         self.config = config or code_graph_config
-        self._client: Optional[chromadb.Client] = None
+        self._client = None
         self._embedding_function = None
-        self._collections: Dict[str, chromadb.Collection] = {}
+        self._collections: Dict[str, Any] = {}
 
     def connect(self) -> None:
         """建立连接"""
@@ -31,6 +35,8 @@ class ChromaDBClient:
             return
 
         try:
+            chromadb, ChromaSettings, embedding_functions = _import_chromadb()
+
             # 连接到 ChromaDB 服务器
             self._client = chromadb.HttpClient(
                 host=self.config.chromadb_host,
@@ -53,6 +59,8 @@ class ChromaDBClient:
     def _init_embedding_function(self) -> None:
         """初始化嵌入函数"""
         try:
+            _, _, embedding_functions = _import_chromadb()
+
             # 使用 Sentence Transformers 本地模型
             self._embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
                 model_name=self.config.embedding_model
@@ -61,6 +69,7 @@ class ChromaDBClient:
         except Exception as e:
             logger.warning(f"Failed to load embedding model {self.config.embedding_model}: {e}")
             # 降级使用默认模型
+            _, _, embedding_functions = _import_chromadb()
             self._embedding_function = embedding_functions.DefaultEmbeddingFunction()
             logger.info("Using default embedding function")
 
@@ -70,7 +79,7 @@ class ChromaDBClient:
         self._collections.clear()
         logger.info("ChromaDB connection closed")
 
-    def _get_collection(self, collection_name: str) -> chromadb.Collection:
+    def _get_collection(self, collection_name: str) -> Any:
         """获取或创建集合"""
         if self._client is None:
             self.connect()
