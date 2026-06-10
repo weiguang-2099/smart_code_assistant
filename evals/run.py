@@ -1,1 +1,196 @@
-"""Argparse entry point. Implemented in Task 8."""
+"""CLI entry point: python -m evals.run --golden ..."""
+import argparse
+import asyncio
+import logging
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+import evals  # noqa: F401  -- triggers sys.path setup before app.* imports
+
+from evals.config import (
+    DEFAULT_CONCURRENCY,
+    DEFAULT_MAX_DEPTH,
+    DEFAULT_OUTPUT_DIR,
+    DEFAULT_PER_CASE_TIMEOUT_S,
+    DEFAULT_TOP_K,
+    EVAL_PROJECT_ID,
+)
+from evals.golden_set.validate import validate_golden_set
+from evals.reporter import compute_aggregate, render_table, write_json
+from evals.runner import load_golden_set, run_corpus
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+logger = logging.getLogger("evals")
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    p = argparse.ArgumentParser(prog="python -m evals.run")
+    p.add_argument("--golden", required=True, type=Path,
+                   help="Path to golden set JSONL")
+    p.add_argument("--index-corpus", type=Path, default=None,
+                   help="If given, index this directory before evaluating")
+    p.add_argument("--project-id", type=int, default=EVAL_PROJECT_ID)
+    p.add_argument("--top-k", type=int, default=DEFAULT_TOP_K)
+    p.add_argument("--max-depth", type=int, default=DEFAULT_MAX_DEPTH)
+    p.add_argument("--categories", type=str, default=None,
+                   help="Comma-separated category filter")
+    p.add_argument("--limit", type=int, default=None,
+                   help="Only run first N cases")
+    p.add_argument("--output-dir", type=Path, default=Path(DEFAULT_OUTPUT_DIR))
+    p.add_argument("--concurrency", type=int, default=DEFAULT_CONCURRENCY)
+    p.add_argument("--quiet", action="store_true",
+                   help="Only print JSON path on success")
+    return p.parse_args(argv)
+
+
+def git_meta() -> tuple[str | None, bool | None]:
+    """Return (short_sha, dirty_bool) or (None, None) if git is unavailable."""
+    try:
+        sha = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"], cwd=REPO_ROOT, text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+        dirty = bool(
+            subprocess.check_output(
+                ["git", "status", "--porcelain"], cwd=REPO_ROOT, text=True,
+                stderr=subprocess.DEVNULL,
+            ).strip()
+        )
+        return sha, dirty
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None, None
+
+
+async def _do_index(corpus_path: Path, project_id: int) -> None:
+    """Index the corpus by walking the directory and calling build_from_files.
+
+    Per TBD #2 (resolved): graph_builder has no 'index a directory' helper.
+    The harness must walk the directory itself, assemble the list of file
+    dicts ({path, content, language}), and call CodeGraphBuilder.build_from_files.
+
+    Path strings written into ``module_path`` here are what later flow into
+    chunk.metadata.module_path during retrieval. To keep matching simple we
+    store them relative to ``corpus_path.parent`` so that, for example, a
+    fixture file lives under ``mini_repo/auth.py`` rather than an absolute
+    OS path.
+    """
+    from app.services.code_graph.graph_builder import CodeGraphBuilder  # noqa: WPS433
+
+    files: list[dict[str, str]] = []
+    for py_file in sorted(corpus_path.rglob("*.py")):
+        rel_path = py_file.relative_to(corpus_path.parent).as_posix()
+        files.append({
+            "path": rel_path,
+            "content": py_file.read_text(encoding="utf-8"),
+            "language": "python",
+        })
+    if not files:
+        raise RuntimeError(f"No .py files found under {corpus_path}")
+
+    builder = CodeGraphBuilder()
+    result = await builder.build_from_files(files, project_id=project_id)
+    if not result.get("success", False):
+        errors = result.get("stats", {}).get("errors", [])
+        raise RuntimeError(
+            f"build_from_files reported failures: {errors[:3]}"
+            f"{' ...' if len(errors) > 3 else ''}"
+        )
+
+
+async def main_async(args: argparse.Namespace) -> int:
+    # 1. Validate golden set
+    try:
+        errors, warnings = validate_golden_set(args.golden, REPO_ROOT)
+    except FileNotFoundError:
+        print(f"ERROR: golden set file not found: {args.golden}", file=sys.stderr)
+        return 2
+    for w in warnings:
+        print(f"WARN: {w}", file=sys.stderr)
+    if errors:
+        for e in errors:
+            print(f"ERROR: {e}", file=sys.stderr)
+        return 2
+
+    cases = load_golden_set(args.golden)
+    if args.categories:
+        allowed = {c.strip() for c in args.categories.split(",") if c.strip()}
+        cases = [c for c in cases if c["category"] in allowed]
+    if args.limit:
+        cases = cases[: args.limit]
+
+    # 2. Optional indexing step
+    if args.index_corpus:
+        try:
+            await _do_index(args.index_corpus, args.project_id)
+        except Exception as exc:
+            print(f"ERROR: --index-corpus failed: {type(exc).__name__}: {exc}",
+                  file=sys.stderr)
+            return 3
+
+    # 3. Build retriever
+    try:
+        from app.services.code_graph.retriever import CodeGraphRetriever
+        retriever = CodeGraphRetriever()
+    except Exception as exc:
+        print(f"ERROR: cannot initialize retriever: {type(exc).__name__}: {exc}",
+              file=sys.stderr)
+        return 3
+
+    # 4. Run
+    results = await run_corpus(
+        cases, retriever,
+        top_k=args.top_k, max_depth=args.max_depth,
+        project_id=args.project_id, concurrency=args.concurrency,
+        timeout_s=DEFAULT_PER_CASE_TIMEOUT_S,
+    )
+
+    # 5. Build meta + aggregate + persist
+    sha, dirty = git_meta()
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    meta = {
+        "timestamp": timestamp,
+        "git_sha": sha,
+        "git_dirty": dirty,
+        "golden_set": str(args.golden),
+        "indexed_corpus": str(args.index_corpus) if args.index_corpus else None,
+        "case_count": len(results),
+        "config": {
+            "top_k": args.top_k,
+            "max_depth": args.max_depth,
+            "project_id": args.project_id,
+            "concurrency": args.concurrency,
+        },
+    }
+    aggregate = compute_aggregate(results)
+
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    safe_ts = timestamp.replace(":", "").replace("-", "")
+    out_path = args.output_dir / f"{safe_ts}.json"
+
+    try:
+        write_json(out_path, meta, results, aggregate)
+    except OSError as exc:
+        # Still print metrics to stdout so a write failure doesn't lose info.
+        print(f"WARN: could not write result file: {exc}", file=sys.stderr)
+        print(render_table(aggregate))
+        return 0
+
+    if args.quiet:
+        print(str(out_path))
+    else:
+        print(render_table(aggregate))
+        print(f"\nWrote {out_path}")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> None:
+    logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
+    args = parse_args(argv)
+    sys.exit(asyncio.run(main_async(args)))
+
+
+if __name__ == "__main__":
+    main()
