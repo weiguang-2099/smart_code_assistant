@@ -99,3 +99,16 @@ class TestValidateGoldenSet:
         jsonl.write_text(json.dumps(valid_case()) + "\n\n", encoding="utf-8")
         errors, _ = validate_golden_set(jsonl, fake_repo)
         assert errors == []
+
+
+def test_fixture_path_resolution(tmp_path):
+    (tmp_path / "evals" / "fixtures" / "mini_repo").mkdir(parents=True)
+    (tmp_path / "evals" / "fixtures" / "mini_repo" / "auth.py").write_text("# stub")
+    case = {
+        "id": "fix-001",
+        "question": "?",
+        "category": "feature_lookup",
+        "expected_files": ["evals/fixtures/mini_repo/auth.py"],
+    }
+    errors, _ = validate_case(case, tmp_path, line_number=1)
+    assert errors == []

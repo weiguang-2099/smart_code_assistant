@@ -11,10 +11,14 @@ ALLOWED_FIELDS = set(REQUIRED_FIELDS) | set(OPTIONAL_FIELDS)
 
 
 def _resolve_repo_path(expected_path: str, repo_root: Path) -> Path:
-    """Map a golden case path (e.g. 'app/core/rate_limiter.py') to a file on disk.
+    """Map a golden case path to a file on disk.
 
-    Adjust this function if Task 1 (TBD #1) reveals a different path convention.
+    Convention:
+    - Paths starting with 'evals/' resolve relative to repo root (fixture cases).
+    - Anything else is treated as a backend-fastapi/-relative path.
     """
+    if expected_path.startswith("evals/"):
+        return repo_root / expected_path
     return repo_root / "backend-fastapi" / expected_path
 
 
