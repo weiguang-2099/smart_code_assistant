@@ -454,21 +454,50 @@ No automatic PR comments in v1. Reviewers download the artifact or read the job 
 
 ## 16. Implementation-time TBDs
 
-These must be resolved on Day 1 of implementation by reading existing source, not by guessing:
+Resolved 2026-06-10 by reading source. All five answers below are cited to exact file:line.
 
-1. **Chunk metadata field name and path format** — open `backend-fastapi/app/services/code_graph/chromadb_client.py` and `graph_builder.py` to find what key on the chunk dict stores the file path, and what root the path is relative to (repo root, `backend-fastapi/`, or `backend-fastapi/app/`). Choose the eval matching convention to match what is actually stored. Update Section 6 path convention if it differs from "starts with `app/`".
+1. **Chunk metadata field name and path format — Resolved**:
+   In `chromadb_client.py:136-144` (functions) and `chromadb_client.py:176-187` (classes), chunks are indexed with a `metadata` dict whose key for the file path is `module_path` — not `file_path`, `path`, or `source`. Results returned from `search_functions` / `search_classes` (lines 231-241) are dicts with structure `{"id": ..., "document": ..., "metadata": {"module_path": ..., "name": ..., ...}, "distance": ..., "relevance_score": ...}`. The `retriever.py:164,176` `_build_combined_context` reads `metadata.get('module_path', '')`.
 
-2. **graph_builder public interface** — read `backend-fastapi/app/services/code_graph/graph_builder.py` to learn the sync/async signature and what it expects (directory path? list of files? project_id required?). Update the `--index-corpus` implementation to call it correctly.
+   The stored path value is whatever the caller passes as `module_path` into `build_from_code` (`graph_builder.py:49`). For `build_from_files` (`graph_builder.py:215`), that value is `file["path"]` with no normalization applied. There is no stripping of `backend-fastapi/` or `app/` prefixes by the storage layer.
 
-3. **Graph neighbor node identity** — open `neo4j_client.py` and `entity_extractor.py` to determine whether neighbors are identified by `name`, `qualified_name`, or `id` in the returned `graph_context`. Update `expected_graph_neighbors` documentation in Section 6 with the canonical form.
+   **Impact on eval harness**: The eval harness (`runner.py`) must read `chunk["metadata"]["module_path"]` (not `chunk["metadata"]["file_path"]`) when extracting a retrieved file path. The path value will be whatever string was passed as `module_path` during indexing — for the `--index-corpus` flow, the harness controls that string via the `file["path"]` entries it assembles. The harness should normalize the path to `app/`-relative form (stripping any leading `backend-fastapi/` prefix) both when building the index and when comparing against `expected_files`. Section 6 `expected_files` convention ("starts with `app/`") remains correct as long as the harness passes `app/...` paths into `build_from_files`.
 
-4. **project_id filtering effectiveness** — read the retriever and the Chroma/Neo4j query code to verify that `project_id=99999` actually scopes queries (not just tags inserted data). If it does not filter on read, the EVAL_PROJECT_ID isolation is a lie and we need a different isolation mechanism (separate Chroma collection name, separate Neo4j database).
+2. **graph_builder public interface — Resolved**:
+   There is no "index a directory" function. `CodeGraphBuilder` (`graph_builder.py`) exposes two relevant public async methods:
 
-5. **Embedding generation path during indexing** — the config sets `CODE_GRAPH_EMBEDDING_MODEL = "BAAI/bge-small-zh-v1.5"` (a local Hugging Face model). Confirm whether `graph_builder` uses this local model end-to-end during indexing or also calls the ZhipuAI API somewhere. Two implications:
-   - If purely local: CI does not need a real `ZHIPUAI_API_KEY`, and we must arrange to cache the bge model weights between CI runs (~100MB, otherwise CI cold start downloads it every time and may exceed the 5-minute budget).
-   - If ZhipuAI API is required: CI needs `ZHIPUAI_API_KEY` as a repository secret, fork PRs will not have access to it, and the `evals-smoke` job must gracefully skip with a clear message on forks.
+   - `build_from_code(code: str, language: str = "python", project_id: Optional[int] = None, module_path: str = "unknown") -> Dict` (`graph_builder.py:44`): indexes a single code string. `project_id` is optional (defaults None, skips ChromaDB indexing if None per line 158).
+   - `build_from_files(files: List[Dict[str, str]], project_id: Optional[int] = None) -> Dict` (`graph_builder.py:185`): takes a list of dicts each with `path`, `content`, and optionally `language`. Calls `build_from_code` in a loop.
 
-All five TBDs must be resolved before any metric code is written. Resolution updates this spec inline.
+   Side effects: for each file, `build_from_code` calls `neo4j.clear_module_graph(module_path)` (line 88) which DETACH-deletes the module's existing nodes before re-inserting — partial destructive wipe per module, not per project. ChromaDB uses `upsert` (lines 147, 189) so vector writes are idempotent. The `--index-corpus PATH` implementation must: (a) walk the directory, (b) read each `.py` file, (c) assemble `files = [{"path": relative_path, "content": text, "language": "python"}, ...]`, (d) call `await builder.build_from_files(files, project_id=EVAL_PROJECT_ID)`. `get_graph_builder()` returns the singleton; calling code must `await` both `_get_neo4j()` (lazy-connects) and the build methods.
+
+3. **Graph neighbor node identity — Resolved**:
+   In `neo4j_client.py:423-426`, `batch_get_entity_context` (used by `retriever.py:98`) returns records with `e.name as name`. The `name` field holds the simple unqualified identifier string (e.g., `"CodeGraphRetriever"`, `"build_from_code"`, `"FastAPI"`). There is no `qualified_name` or composite ID field anywhere in the Neo4j schema.
+
+   The call-count summary entries appended at lines 462-466 use the key `"entity"` (not `"name"`), holding the same plain-name string. The `retriever.py:184-193` `_build_combined_context` checks for both `"name"` in ctx (entity node entries) and `"entity"` in ctx (call-count entries).
+
+   **Impact on eval harness**: `expected_graph_neighbors` in golden cases should use simple unqualified names (e.g., `"CodeGraphRetriever"`, `"slowapi.Limiter"`). The graph extractor in `runner.py` must collect the `name` field from entity-node entries AND the `entity` field from call-count entries to build set G. Section 6 example `"slowapi.Limiter"` is a module-qualified name that works only if Neo4j stores it that way — in practice, the `name` stored is whatever AST parsing yields (typically the bare identifier, not the fully-qualified form). Golden case authors must verify actual stored names rather than assuming import paths.
+
+4. **project_id filtering effectiveness — Resolved**:
+   ChromaDB isolation is effective: `chromadb_client.py:114` and `219` route all reads and writes through per-project named collections (`project_{project_id}_functions`, `project_{project_id}_classes`). A query for `project_id=99999` only touches `project_99999_functions` and `project_99999_classes`, never other projects' collections. No cross-project data leakage in ChromaDB.
+
+   Neo4j isolation is NOT enforced on read: `create_module` tags `Module` nodes with `project_id` (`neo4j_client.py:107`), but none of the query methods (`get_function_callers`, `get_function_callees`, `search_entities`, `batch_get_entity_context`) include a `WHERE n.project_id = $project_id` clause. All graph traversal queries are global — they match any node in the database regardless of which project indexed it. `EVAL_PROJECT_ID=99999` correctly scopes ChromaDB but does NOT scope Neo4j graph results.
+
+   **Impact on eval harness**: For CI correctness, the Neo4j service container used in CI starts empty each run (ephemeral Docker service), so there is no cross-project contamination in CI. For local runs, if a developer has other projects' data in their Neo4j instance, graph metrics may pick up unrelated neighbor nodes and artificially inflate or deflate scores. The harness should document this limitation. A future mitigation would be for the harness to call `await neo4j.clear_project_graph(EVAL_PROJECT_ID)` before `--index-corpus`, but `clear_project_graph` (`neo4j_client.py:491`) only deletes nodes reachable from the Project node and Module nodes — it may miss orphaned nodes. True isolation would require a separate Neo4j database, which is deferred.
+
+5. **Embedding generation path during indexing — Resolved**:
+   Embedding is purely local. `chromadb_client.py:65-67` initializes `embedding_functions.SentenceTransformerEmbeddingFunction(model_name=self.config.embedding_model)` using ChromaDB's built-in wrapper around the `sentence-transformers` library. The model is set to `"BAAI/bge-small-zh-v1.5"` in `app/core/config.py:89` and `.env.example:55`. No ZhipuAI API call is made anywhere in the indexing path.
+
+   **CI implications**: The `ZHIPUAI_API_KEY: ci-test-key` line in the CI YAML is a no-op for indexing — it can remain as a stub or be removed. More importantly, the ~110 MB bge model weights are downloaded from HuggingFace on first use. CI must cache the HuggingFace model cache directory (default `~/.cache/huggingface/hub`) between runs, otherwise every CI run downloads ~110 MB and risks exceeding the 5-minute budget. Add a `cache` step in the `evals-smoke` job:
+   ```yaml
+   - uses: actions/cache@v4
+     with:
+       path: ~/.cache/huggingface/hub
+       key: hf-bge-small-zh-v1.5-${{ runner.os }}
+   ```
+   If `sentence-transformers` is not installed (it is a ChromaDB extra), CI may fall back to `DefaultEmbeddingFunction` (`chromadb_client.py:73`) — ensure `requirements.txt` includes `sentence-transformers` or `chromadb[sentence-transformers]`.
+
+All five TBDs are now resolved. No further guessing is required before writing metric code.
 
 ## 17. README additions (Phase 0 housekeeping, done alongside this)
 
