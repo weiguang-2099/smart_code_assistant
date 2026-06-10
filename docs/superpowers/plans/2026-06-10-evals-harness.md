@@ -1302,42 +1302,58 @@ def load_golden_set(path: Path) -> list[dict]:
 def extract_files_from_retrieval(semantic_results: Sequence[dict]) -> list[str]:
     """Extract chunk file paths in rank order.
 
-    The field name below (``metadata.file_path``) is the assumption pending Task 1
-    TBD #1 resolution. After reading chromadb_client.py, replace this line with
-    the confirmed accessor.
+    Per TBD #1 (resolved Section 16 of spec): each chunk stores its path under
+    ``metadata.module_path``. The storage layer applies no normalization — the
+    stored value is whatever string was passed during indexing. The eval harness
+    strips a leading ``backend-fastapi/`` so paths line up with golden cases'
+    ``app/...`` convention.
     """
     files: list[str] = []
     for chunk in semantic_results:
         if not isinstance(chunk, dict):
             continue
         metadata = chunk.get("metadata") or {}
-        file_path = metadata.get("file_path")
-        if not file_path:
+        module_path = metadata.get("module_path")
+        if not module_path:
             continue
-        # Golden cases use 'app/...' paths; strip 'backend-fastapi/' if present.
-        if file_path.startswith("backend-fastapi/"):
-            file_path = file_path[len("backend-fastapi/"):]
-        files.append(file_path)
+        if module_path.startswith("backend-fastapi/"):
+            module_path = module_path[len("backend-fastapi/"):]
+        files.append(module_path)
     return files
 
 
 def extract_neighbors_from_graph(graph_context: Optional[dict]) -> list[str]:
     """Extract neighbor node identifiers from graph_context.
 
-    Adjust after Task 1 confirms whether nodes use 'name', 'qualified_name', or 'id'.
+    Per TBD #3 (resolved): entity entries store the identifier under ``name``;
+    call-count summary entries store it under ``entity``. Both keys must be
+    collected for full coverage. Identifiers are bare unqualified strings
+    (e.g., ``"CodeGraphRetriever"``, NOT ``"app.services.code_graph.retriever.CodeGraphRetriever"``).
+
+    The exact shape of ``graph_context`` is determined by ``retriever.py``;
+    when implementing, open retriever.py and confirm the iteration shape before
+    finalizing the walker. The defensive recursive walk below handles list/dict
+    nesting without making strong shape assumptions.
     """
     if not graph_context:
         return []
     neighbors: list[str] = []
-    raw_nodes = graph_context.get("neighbors") or graph_context.get("nodes") or []
-    for node in raw_nodes:
-        if isinstance(node, str):
-            neighbors.append(node)
-            continue
-        if isinstance(node, dict):
-            identifier = node.get("qualified_name") or node.get("name") or node.get("id")
-            if identifier:
-                neighbors.append(identifier)
+    seen: set[str] = set()
+
+    def _walk(obj: object) -> None:
+        if isinstance(obj, dict):
+            for key in ("name", "entity"):
+                value = obj.get(key)
+                if isinstance(value, str) and value and value not in seen:
+                    seen.add(value)
+                    neighbors.append(value)
+            for v in obj.values():
+                _walk(v)
+        elif isinstance(obj, list):
+            for item in obj:
+                _walk(item)
+
+    _walk(graph_context)
     return neighbors
 
 
@@ -1572,13 +1588,39 @@ def git_meta() -> tuple[str | None, bool | None]:
 
 
 async def _do_index(corpus_path: Path, project_id: int) -> None:
-    """Index the corpus into Neo4j+Chroma via the existing graph_builder.
+    """Index the corpus by walking the directory and calling build_from_files.
 
-    The function name and signature here depend on Task 1 TBD #2. Adjust the
-    import and call site after reading graph_builder.py.
+    Per TBD #2 (resolved): graph_builder has no 'index a directory' helper.
+    The harness must walk the directory itself, assemble the list of file
+    dicts ({path, content, language}), and call CodeGraphBuilder.build_from_files.
+
+    Path strings written into ``module_path`` here are what later flow into
+    chunk.metadata.module_path during retrieval. To keep matching simple we
+    store them relative to ``corpus_path.parent`` so that, for example, a
+    fixture file lives under ``mini_repo/auth.py`` rather than an absolute
+    OS path.
     """
-    from app.services.code_graph.graph_builder import build_graph_from_directory  # noqa: WPS433
-    await build_graph_from_directory(str(corpus_path), project_id=project_id)
+    from app.services.code_graph.graph_builder import CodeGraphBuilder  # noqa: WPS433
+
+    files: list[dict[str, str]] = []
+    for py_file in sorted(corpus_path.rglob("*.py")):
+        rel_path = py_file.relative_to(corpus_path.parent).as_posix()
+        files.append({
+            "path": rel_path,
+            "content": py_file.read_text(encoding="utf-8"),
+            "language": "python",
+        })
+    if not files:
+        raise RuntimeError(f"No .py files found under {corpus_path}")
+
+    builder = CodeGraphBuilder()
+    result = await builder.build_from_files(files, project_id=project_id)
+    if not result.get("success", False):
+        errors = result.get("stats", {}).get("errors", [])
+        raise RuntimeError(
+            f"build_from_files reported failures: {errors[:3]}"
+            f"{' ...' if len(errors) > 3 else ''}"
+        )
 
 
 async def main_async(args: argparse.Namespace) -> int:
@@ -1977,7 +2019,7 @@ git commit -m "feat(evals): mini_repo fixture (8 files, 12 golden cases) for CI 
 
 **Goal:** Append a new GHA job to `.github/workflows/ci.yml` that runs the eval unit tests and the mini_fixture smoke eval with Neo4j+Chroma service containers. Uploads JSON result as artifact. Does not block other jobs.
 
-**Note:** The `ZHIPUAI_API_KEY` env entry below assumes Task 1 TBD #5 resolved to "local bge model" (no real key needed). If TBD #5 resolved to "remote API required," replace `ci-test-key` with `${{ secrets.ZHIPUAI_API_KEY }}` and add `if: ${{ github.event.pull_request.head.repo.fork == false }}` to the job to skip on fork PRs.
+**Note (from TBD #5 resolution):** Indexing is purely local — `sentence-transformers` with `BAAI/bge-small-zh-v1.5` (~110 MB). No ZhipuAI API call during indexing. The `ZHIPUAI_API_KEY` env value below is a stub kept for backend-fastapi config compatibility only. A HuggingFace cache step is required to stay inside the 5-minute budget — without it CI pulls the 110 MB model fresh every run and routinely exceeds the timeout.
 
 **Files:**
 - Modify: `.github/workflows/ci.yml`
@@ -2020,6 +2062,11 @@ Open `.github/workflows/ci.yml`. After the `frontend:` job's final line, add:
           python-version: "3.11"
           cache: pip
           cache-dependency-path: backend-fastapi/requirements.txt
+      - name: Cache HuggingFace bge model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-bge-small-zh-v1.5-${{ runner.os }}
       - name: Install backend deps
         working-directory: backend-fastapi
         run: pip install -r requirements.txt
@@ -2113,10 +2160,10 @@ For every candidate, before adding it to the file:
 - Open the candidate's `expected_files` paths in the repo and confirm the file exists and the named symbol is actually in it.
 - For `expected_graph_neighbors`, infer statically from imports/call sites; mark these as low-confidence in `notes` so the reviewer knows they're not Neo4j-verified.
 
-Write to `evals/golden_set/backend_fastapi.draft.jsonl`. Example two lines:
+Write to `evals/golden_set/backend_fastapi.draft.jsonl`. Important per TBD #3 (resolved): `expected_graph_neighbors` entries must be **bare unqualified identifiers** (e.g., `"Limiter"`, NOT `"slowapi.Limiter"`). The Neo4j store does not keep import-qualified names. Example two lines:
 
 ```jsonl
-{"id":"rate-limiter-001","question":"How is per-user rate limiting wired into FastAPI?","category":"feature_lookup","expected_files":["app/core/rate_limiter.py","app/main.py"],"expected_symbols":["setup_rate_limiting"],"expected_graph_neighbors":["slowapi.Limiter"],"notes":"graph neighbors inferred statically; verify against actual Neo4j"}
+{"id":"rate-limiter-001","question":"How is per-user rate limiting wired into FastAPI?","category":"feature_lookup","expected_files":["app/core/rate_limiter.py","app/main.py"],"expected_symbols":["setup_rate_limiting"],"expected_graph_neighbors":["Limiter","setup_rate_limiting"],"notes":"graph neighbors inferred from imports + call sites; verify against actual Neo4j once indexed"}
 {"id":"sentry-001","question":"Where is Sentry initialized?","category":"definition_lookup","expected_files":["app/core/sentry.py"],"expected_symbols":["init_sentry"]}
 ```
 
