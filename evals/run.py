@@ -11,14 +11,16 @@ import evals  # noqa: F401  -- triggers sys.path setup before app.* imports
 
 from evals.config import (
     DEFAULT_CONCURRENCY,
+    DEFAULT_GEN_TIMEOUT_S,
     DEFAULT_MAX_DEPTH,
     DEFAULT_OUTPUT_DIR,
     DEFAULT_PER_CASE_TIMEOUT_S,
     DEFAULT_TOP_K,
     EVAL_PROJECT_ID,
 )
+from evals.generation import GEN_PROMPT_VERSION
 from evals.golden_set.validate import validate_golden_set
-from evals.reporter import compute_aggregate, render_table, write_json
+from evals.reporter import compute_aggregate, compute_generation_aggregate, render_table, write_json
 from evals.runner import load_golden_set, run_corpus
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -43,6 +45,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--concurrency", type=int, default=DEFAULT_CONCURRENCY)
     p.add_argument("--quiet", action="store_true",
                    help="Only print JSON path on success")
+    p.add_argument("--with-generation", action="store_true",
+                   help="Generate answers and run LLM-as-judge metrics "
+                        "(requires LLM_API_KEY or ZHIPUAI_API_KEY)")
+    p.add_argument("--gen-model", type=str, default=None,
+                   help="Override generator model (default: provider 'default' tier)")
+    p.add_argument("--judge-model", type=str, default=None,
+                   help="Override judge model (default: provider 'quality' tier)")
+    p.add_argument("--gen-timeout", type=float, default=DEFAULT_GEN_TIMEOUT_S,
+                   help="Per-case generation+judge budget in seconds")
     return p.parse_args(argv)
 
 
@@ -121,6 +132,19 @@ async def main_async(args: argparse.Namespace) -> int:
     if args.limit:
         cases = cases[: args.limit]
 
+    gen_llm = judge_llm = None
+    if args.with_generation:
+        from app.core.config import settings
+        if not (settings.LLM_API_KEY or settings.ZHIPUAI_API_KEY):
+            print("ERROR: --with-generation requires LLM_API_KEY or "
+                  "ZHIPUAI_API_KEY to be configured", file=sys.stderr)
+            return 2
+        from app.services.langchain_glm_service import LLMService
+        gen_llm = (LLMService(model=args.gen_model) if args.gen_model
+                   else LLMService(tier="default"))
+        judge_llm = (LLMService(model=args.judge_model) if args.judge_model
+                     else LLMService(tier="quality"))
+
     # 2. Optional indexing step
     if args.index_corpus:
         try:
@@ -147,6 +171,13 @@ async def main_async(args: argparse.Namespace) -> int:
         timeout_s=DEFAULT_PER_CASE_TIMEOUT_S,
     )
 
+    if args.with_generation:
+        from evals.runner import run_generation_phase
+        await run_generation_phase(
+            results, gen_llm, judge_llm,
+            concurrency=args.concurrency, timeout_s=args.gen_timeout,
+        )
+
     # 5. Build meta + aggregate + persist
     sha, dirty = git_meta()
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -162,9 +193,16 @@ async def main_async(args: argparse.Namespace) -> int:
             "max_depth": args.max_depth,
             "project_id": args.project_id,
             "concurrency": args.concurrency,
+            "with_generation": args.with_generation,
+            "gen_model": gen_llm.model if gen_llm else None,
+            "judge_model": judge_llm.model if judge_llm else None,
+            "gen_prompt_version": GEN_PROMPT_VERSION if args.with_generation else None,
         },
     }
     aggregate = compute_aggregate(results)
+    gen_aggregate = compute_generation_aggregate(results)
+    if gen_aggregate is not None:
+        aggregate["generation"] = gen_aggregate
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     safe_ts = timestamp.replace(":", "").replace("-", "")
