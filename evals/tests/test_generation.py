@@ -65,9 +65,22 @@ class TestGenerateAndJudge:
         assert result.error.startswith("judge:")
 
     @pytest.mark.asyncio
+    async def test_second_judge_exception_keeps_first_score(self):
+        gen_llm = FakeLLM(["answer"])
+        # faithfulness succeeds, relevance raises
+        judge_llm = FakeLLM([GOOD_JUDGE, RuntimeError("relevance down")])
+        result = await generate_and_judge("q", "ctx", gen_llm, judge_llm)
+        assert result.answer == "answer"
+        assert result.faithfulness == 4
+        assert result.answer_relevance is None
+        assert result.error.startswith("judge:")
+
+    @pytest.mark.asyncio
     async def test_parse_errors_counted_not_fatal(self):
         gen_llm = FakeLLM(["answer"])
-        judge_llm = FakeLLM(["junk", "junk", GOOD_JUDGE])  # faith fails twice, rel ok
+        # faithfulness exhausts both judge_once attempts (initial + retry),
+        # relevance succeeds on its first call
+        judge_llm = FakeLLM(["junk", "junk", GOOD_JUDGE])
         result = await generate_and_judge("q", "ctx", gen_llm, judge_llm)
         assert result.faithfulness is None
         assert result.answer_relevance == 4

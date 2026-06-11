@@ -5,7 +5,7 @@ GEN_PROMPT_VERSION untouched so generation-metric deltas are attributable
 to retrieval, not prompt drift.
 """
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
 GEN_PROMPT_VERSION = "v1"
 
@@ -22,6 +22,8 @@ MAX_CONTEXT_CHARS = 12000
 
 
 def build_gen_prompt(question: str, context: Optional[str]) -> tuple[str, str]:
+    """Assemble (system, user) prompts. Context beyond MAX_CONTEXT_CHARS is
+    silently truncated from the tail."""
     context = (context or "")[:MAX_CONTEXT_CHARS]
     return GEN_SYSTEM_PROMPT, f"CODE CONTEXT:\n{context}\n\nQUESTION:\n{question}"
 
@@ -37,7 +39,12 @@ class GenerationResult:
     error: Optional[str] = None
 
 
-async def generate_and_judge(question, combined_context, gen_llm, judge_llm) -> GenerationResult:
+async def generate_and_judge(
+    question: str,
+    combined_context: Optional[str],
+    gen_llm: Any,
+    judge_llm: Any,
+) -> GenerationResult:
     """Generate an answer from the retrieved context, then score it with two
     blind judges. Generation failure short-circuits (nothing to judge); judge
     failure preserves the answer. Parse failures are counted, never fatal."""
