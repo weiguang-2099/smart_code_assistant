@@ -49,9 +49,12 @@ _GEN_METRIC_KEYS = ("faithfulness", "answer_relevance")
 
 def compute_generation_aggregate(case_results: Iterable[Any]) -> "dict | None":
     """Aggregate GenerationResults, overall and per category (spec 7.3).
-    Returns None when no case carries one (retrieval-only runs keep their
-    JSON byte-identical to v1). Null scores are excluded from means;
-    per-metric sample size is reported."""
+
+    - returns None when no case carries one, so retrieval-only runs get no
+      aggregate section (per-case dicts still gain ``generation: null``)
+    - null scores are excluded from means
+    - per-metric sample size is reported
+    """
     annotated = [r for r in case_results if getattr(r, "generation", None) is not None]
     if not annotated:
         return None
@@ -126,7 +129,7 @@ def render_table(aggregate: dict) -> str:
             lines.append(row)
 
     gen = aggregate.get("generation")
-    if gen:
+    if gen is not None:
         lines.append("")
         lines.append(
             f"==== Generation (n={gen['n']}, gen_errors={gen['gen_errors']}, "

@@ -121,7 +121,21 @@ class TestWriteJson:
         assert loaded["meta"]["git_dirty"] is True
         assert len(loaded["cases"]) == 1
         assert loaded["cases"][0]["metrics"]["hit_rate@5"] == 1
+        assert loaded["cases"][0]["generation"] is None
         assert loaded["aggregate"]["overall"]["n"] == 1
+
+    def test_roundtrip_with_generation(self, tmp_path):
+        results = [_gen_case("g1", 4, 5)]
+        aggregate = compute_aggregate(results)
+        out_path = tmp_path / "result.json"
+
+        write_json(out_path, {"case_count": 1}, results, aggregate)
+
+        loaded = json.loads(out_path.read_text(encoding="utf-8"))
+        gen = loaded["cases"][0]["generation"]
+        assert gen["faithfulness"] == 4
+        assert gen["answer_relevance"] == 5
+        assert gen["error"] is None
 
 
 def _gen_case(case_id, faith, rel, *, error=None, parse_errors=0):
