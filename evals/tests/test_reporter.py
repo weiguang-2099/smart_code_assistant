@@ -4,7 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from evals.reporter import compute_aggregate, render_table, write_json
+from evals.generation import GenerationResult
+from evals.reporter import compute_aggregate, compute_generation_aggregate, render_table, write_json
+from evals.runner import CaseResult
 
 
 @dataclass
@@ -120,3 +122,74 @@ class TestWriteJson:
         assert len(loaded["cases"]) == 1
         assert loaded["cases"][0]["metrics"]["hit_rate@5"] == 1
         assert loaded["aggregate"]["overall"]["n"] == 1
+
+
+def _gen_case(case_id, faith, rel, *, error=None, parse_errors=0):
+    return CaseResult(
+        id=case_id, category="definition_lookup", expected_files=["app/a.py"],
+        expected_graph_neighbors=None,
+        generation=GenerationResult(
+            answer="a", faithfulness=faith, answer_relevance=rel,
+            judge_parse_errors=parse_errors, error=error,
+        ),
+    )
+
+
+class TestComputeGenerationAggregate:
+    def test_no_generation_returns_none(self):
+        plain = CaseResult(id="x", category="definition_lookup",
+                           expected_files=[], expected_graph_neighbors=None)
+        assert compute_generation_aggregate([plain]) is None
+
+    def test_means_and_pct_ge_4(self):
+        cases = [_gen_case("a", 5, 4), _gen_case("b", 3, 2), _gen_case("c", 4, 5)]
+        agg = compute_generation_aggregate(cases)
+        assert agg["n"] == 3
+        assert agg["faithfulness"] == 4.0
+        assert agg["faithfulness_pct_ge_4"] == round(2 / 3, 4)
+        assert agg["answer_relevance_pct_ge_4"] == round(2 / 3, 4)
+
+    def test_errors_and_nulls_excluded_from_means(self):
+        cases = [
+            _gen_case("ok", 5, 5),
+            _gen_case("err", None, None, error="generation: boom"),
+            _gen_case("parse", None, 4, parse_errors=1),
+        ]
+        agg = compute_generation_aggregate(cases)
+        assert agg["n"] == 3
+        assert agg["gen_errors"] == 1
+        assert agg["gen_error_rate"] == round(1 / 3, 4)
+        assert agg["judge_parse_errors"] == 1
+        assert agg["faithfulness"] == 5.0       # only the one non-null value
+        assert agg["faithfulness_n"] == 1
+        assert agg["answer_relevance_n"] == 2
+
+    def test_by_category_breakdown(self):
+        cases = [_gen_case("a", 5, 4), _gen_case("b", 3, 2)]
+        agg = compute_generation_aggregate(cases)
+        cat = agg["by_category"]["definition_lookup"]
+        assert cat["n"] == 2
+        assert cat["faithfulness"] == 4.0
+        assert cat["answer_relevance"] == 3.0
+
+
+class TestGenerationTableSection:
+    def test_render_includes_generation_when_present(self):
+        aggregate = {
+            "overall": {"n": 2, "errors": 0, "hit_rate@5": 0.5},
+            "by_category": {},
+            "generation": {
+                "n": 2, "gen_errors": 0, "gen_error_rate": 0.0,
+                "judge_parse_errors": 0,
+                "faithfulness": 4.5, "faithfulness_pct_ge_4": 1.0, "faithfulness_n": 2,
+                "answer_relevance": 4.0, "answer_relevance_pct_ge_4": 0.5,
+                "answer_relevance_n": 2,
+            },
+        }
+        out = render_table(aggregate)
+        assert "==== Generation" in out
+        assert "faithfulness" in out
+
+    def test_render_unchanged_without_generation(self):
+        aggregate = {"overall": {"n": 1, "errors": 0, "hit_rate@5": 1.0}, "by_category": {}}
+        assert "Generation" not in render_table(aggregate)

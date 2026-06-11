@@ -1,6 +1,7 @@
 """Aggregate per-case results, render the stdout table, write the JSON result file."""
 import json
 from collections import defaultdict
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -43,6 +44,48 @@ def compute_aggregate(case_results: Iterable[Any]) -> dict:
     return {"overall": overall, "by_category": by_category}
 
 
+_GEN_METRIC_KEYS = ("faithfulness", "answer_relevance")
+
+
+def compute_generation_aggregate(case_results: Iterable[Any]) -> "dict | None":
+    """Aggregate GenerationResults, overall and per category (spec 7.3).
+    Returns None when no case carries one (retrieval-only runs keep their
+    JSON byte-identical to v1). Null scores are excluded from means;
+    per-metric sample size is reported."""
+    annotated = [r for r in case_results if getattr(r, "generation", None) is not None]
+    if not annotated:
+        return None
+    gens = [r.generation for r in annotated]
+    n = len(gens)
+    gen_errors = sum(1 for g in gens if g.error)
+    block: dict[str, Any] = {
+        "n": n,
+        "gen_errors": gen_errors,
+        "gen_error_rate": round(gen_errors / n, 4),
+        "judge_parse_errors": sum(g.judge_parse_errors for g in gens),
+    }
+    for key in _GEN_METRIC_KEYS:
+        values = [getattr(g, key) for g in gens if getattr(g, key) is not None]
+        if values:
+            block[key] = round(sum(values) / len(values), 4)
+            block[f"{key}_pct_ge_4"] = round(sum(1 for v in values if v >= 4) / len(values), 4)
+            block[f"{key}_n"] = len(values)
+
+    by_category: dict[str, dict] = {}
+    cat_cases: dict[str, list] = defaultdict(list)
+    for r in annotated:
+        cat_cases[r.category].append(r.generation)
+    for cat, cat_gens in cat_cases.items():
+        cat_block: dict[str, Any] = {"n": len(cat_gens)}
+        for key in _GEN_METRIC_KEYS:
+            values = [getattr(g, key) for g in cat_gens if getattr(g, key) is not None]
+            if values:
+                cat_block[key] = round(sum(values) / len(values), 4)
+        by_category[cat] = cat_block
+    block["by_category"] = by_category
+    return block
+
+
 # Order matters for the stdout table; entries not present in aggregate are skipped.
 _OVERALL_KEY_ORDER = (
     "hit_rate@1",
@@ -82,6 +125,20 @@ def render_table(aggregate: dict) -> str:
                 row += f"  {cell!s:>10}"
             lines.append(row)
 
+    gen = aggregate.get("generation")
+    if gen:
+        lines.append("")
+        lines.append(
+            f"==== Generation (n={gen['n']}, gen_errors={gen['gen_errors']}, "
+            f"judge_parse_errors={gen['judge_parse_errors']}) ===="
+        )
+        for key in _GEN_METRIC_KEYS:
+            if key in gen:
+                lines.append(
+                    f"{key:<28}  {gen[key]}  (>=4: {gen[f'{key}_pct_ge_4']:.0%}, "
+                    f"n={gen[f'{key}_n']})"
+                )
+
     return "\n".join(lines)
 
 
@@ -99,6 +156,10 @@ def write_json(out_path: Path, meta: dict, results: Iterable[Any], aggregate: di
                 "retrieved_graph_neighbors": r.retrieved_graph_neighbors,
                 "metrics": r.metrics,
                 "error": r.error,
+                "generation": (
+                    None if getattr(r, "generation", None) is None
+                    else asdict(r.generation)
+                ),
             }
             for r in results
         ],
