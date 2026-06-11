@@ -204,7 +204,10 @@ class LLMService:
         return self.llm
 
 
-# Global singletons (names preserved; tier mapping per spec section 5.3)
+# Global singletons (names preserved; tier mapping per spec section 5.3).
+# Their _config is resolved once at import; .llm stays lazy, so importing
+# this module without an API key is safe but later settings changes do not
+# affect already-constructed instances.
 langchain_glm_service = LLMService(tier="default")
 
 glm_service_flash = LLMService(tier="fast")     # fast responses

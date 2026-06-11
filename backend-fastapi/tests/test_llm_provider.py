@@ -1,9 +1,11 @@
 """Tests for provider preset resolution (app/core/llm_config.py)."""
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
 from app.core.llm_config import PROVIDER_PRESETS, TIERS, resolve_llm_config
+from app.services.langchain_glm_service import LangChainGLMService, LLMService
 
 
 def fake_settings(**overrides):
@@ -84,11 +86,6 @@ class TestValidation:
     def test_all_tiers_present_in_all_presets(self):
         for preset in PROVIDER_PRESETS.values():
             assert set(preset["models"]) == set(TIERS)
-
-
-from unittest.mock import MagicMock, patch
-
-from app.services.langchain_glm_service import LangChainGLMService, LLMService
 
 
 class TestLLMServiceLazyInit:
