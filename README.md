@@ -233,6 +233,9 @@ Key configuration options (set in `backend-fastapi/.env`):
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `ZHIPU_API_KEY` | ZhipuAI API key | - |
+| `LLM_PROVIDER` | LLM provider: `zhipuai` or `openai` | `zhipuai` |
+| `LLM_API_KEY` | Provider API key (falls back to `ZHIPUAI_API_KEY`) | _(unset)_ |
+| `LLM_MODEL` | Override default-tier model (else provider preset) | _(unset)_ |
 | `DATABASE_URL` | MySQL connection string | `mysql+aiomysql://...` |
 | `NEO4J_URI` | Neo4j Bolt URI | `bolt://localhost:7687` |
 | `CHROMA_HOST` | ChromaDB host | `localhost` |
