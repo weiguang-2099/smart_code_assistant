@@ -4,7 +4,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional, Sequence
+from typing import Any, Optional
 
 from evals.config import (
     DEFAULT_CONCURRENCY,
@@ -40,19 +40,34 @@ def load_golden_set(path: Path) -> list[dict]:
     return cases
 
 
-def extract_files_from_retrieval(semantic_results: Sequence[dict]) -> list[str]:
+def _flatten_semantic_results(semantic_results) -> list[dict]:
+    """search_all() returns {"functions": [...], "classes": [...]}; merge the
+    per-collection lists into one ranking by relevance_score (descending,
+    chromadb_client.py:239 — higher is better). Flat lists (unit fixtures and
+    any future pre-merged source) pass through with non-dict items dropped."""
+    if isinstance(semantic_results, dict):
+        merged = []
+        for chunks in semantic_results.values():
+            if isinstance(chunks, list):
+                merged.extend(c for c in chunks if isinstance(c, dict))
+        merged.sort(key=lambda c: c.get("relevance_score", 0), reverse=True)
+        return merged
+    return [c for c in semantic_results if isinstance(c, dict)]
+
+
+def extract_files_from_retrieval(semantic_results) -> list[str]:
     """Extract chunk file paths in rank order.
 
-    Per TBD #1 (resolved Section 16 of spec): each chunk stores its path under
-    ``metadata.module_path``. The storage layer applies no normalization — the
-    stored value is whatever string was passed during indexing. The eval harness
-    strips a leading ``backend-fastapi/`` so paths line up with golden cases'
-    ``app/...`` convention.
+    Accepts either search_all()'s dict shape (merged by relevance_score via
+    _flatten_semantic_results) or a pre-flattened chunk list.
+
+    Per TBD #1 (resolved Section 16 of the v1 spec): each chunk stores its
+    path under ``metadata.module_path``. The storage layer applies no
+    normalization — the harness strips a leading ``backend-fastapi/`` so
+    paths line up with golden cases' ``app/...`` convention.
     """
     files: list[str] = []
-    for chunk in semantic_results:
-        if not isinstance(chunk, dict):
-            continue
+    for chunk in _flatten_semantic_results(semantic_results):
         metadata = chunk.get("metadata") or {}
         module_path = metadata.get("module_path")
         if not module_path:
