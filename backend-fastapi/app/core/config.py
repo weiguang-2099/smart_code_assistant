@@ -67,6 +67,18 @@ class Settings(BaseSettings):
     # ZhipuAI Configuration
     ZHIPUAI_API_KEY: str = ""
 
+    # LLM Provider Configuration
+    # LLM_PROVIDER: "zhipuai" (default) or "openai".
+    # LLM_API_KEY falls back to ZHIPUAI_API_KEY when empty (backward compat).
+    # Empty model/base_url fields resolve to per-provider presets (app/core/llm_config.py).
+    LLM_PROVIDER: str = "zhipuai"
+    LLM_API_KEY: str = ""
+    LLM_BASE_URL: str = ""
+    LLM_MODEL: str = ""
+    LLM_MODEL_FAST: str = ""
+    LLM_MODEL_QUALITY: str = ""
+    LLM_MODEL_LIGHT: str = ""
+
     # Datalab (Marker) API Configuration
     DATALAB_API_KEY: str = ""
     DATALAB_API_URL: str = "https://www.datalab.to/api/v1/marker"
