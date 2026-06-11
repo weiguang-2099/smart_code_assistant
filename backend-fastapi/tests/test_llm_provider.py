@@ -84,3 +84,55 @@ class TestValidation:
     def test_all_tiers_present_in_all_presets(self):
         for preset in PROVIDER_PRESETS.values():
             assert set(preset["models"]) == set(TIERS)
+
+
+from unittest.mock import MagicMock, patch
+
+from app.services.langchain_glm_service import LangChainGLMService, LLMService
+
+
+class TestLLMServiceLazyInit:
+    def _patch_settings(self, monkeypatch, **overrides):
+        monkeypatch.setattr(
+            "app.services.langchain_glm_service.settings", fake_settings(**overrides)
+        )
+
+    def test_construct_without_key_does_not_raise(self, monkeypatch):
+        self._patch_settings(monkeypatch)
+        svc = LLMService()  # no key anywhere -- must not raise here
+        assert svc.model == "glm-4"
+
+    def test_first_llm_access_without_key_raises(self, monkeypatch):
+        self._patch_settings(monkeypatch)
+        svc = LLMService()
+        with pytest.raises(ValueError, match="LLM_API_KEY"):
+            _ = svc.llm
+
+    def test_llm_built_once_with_resolved_params(self, monkeypatch):
+        self._patch_settings(monkeypatch, LLM_PROVIDER="openai", LLM_API_KEY="ok-key")
+        with patch("app.services.langchain_glm_service.ChatOpenAI") as ChatOpenAI:
+            svc = LLMService(tier="fast", temperature=0.3)
+            ChatOpenAI.assert_not_called()  # lazy: nothing at construction
+            first = svc.llm
+            second = svc.llm
+            assert first is second
+            ChatOpenAI.assert_called_once_with(
+                api_key="ok-key",
+                base_url="https://api.openai.com/v1",
+                model="gpt-4o-mini",
+                temperature=0.3,
+                max_tokens=None,
+            )
+
+    def test_tier_quality_zhipuai(self, monkeypatch):
+        self._patch_settings(monkeypatch, ZHIPUAI_API_KEY="zk")
+        assert LLMService(tier="quality").model == "glm-4-plus"
+
+    def test_alias_is_same_class(self):
+        assert LangChainGLMService is LLMService
+
+    def test_explicit_args_still_win(self, monkeypatch):
+        self._patch_settings(monkeypatch, ZHIPUAI_API_KEY="zk")
+        svc = LLMService(api_key="explicit", model="custom-model")
+        assert svc.model == "custom-model"
+        assert svc.api_key == "explicit"

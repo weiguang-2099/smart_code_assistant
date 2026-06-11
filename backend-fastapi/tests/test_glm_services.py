@@ -99,13 +99,19 @@ class TestGLMServiceChatOld:
 # ============================================================================
 
 class TestLangChainGLMService:
-    def test_requires_api_key(self, monkeypatch):
+    def test_missing_key_raises_on_first_use(self, monkeypatch):
+        from types import SimpleNamespace
         monkeypatch.setattr(
             "app.services.langchain_glm_service.settings",
-            MagicMock(ZHIPUAI_API_KEY=""),
+            SimpleNamespace(
+                LLM_PROVIDER="zhipuai", LLM_API_KEY="", LLM_BASE_URL="",
+                LLM_MODEL="", LLM_MODEL_FAST="", LLM_MODEL_QUALITY="",
+                LLM_MODEL_LIGHT="", ZHIPUAI_API_KEY="",
+            ),
         )
-        with pytest.raises(ValueError):
-            LangChainGLMService()
+        svc = LangChainGLMService()  # construction is now safe
+        with pytest.raises(ValueError, match="LLM_API_KEY"):
+            _ = svc.llm
 
     def test_get_llm_returns_inner_llm(self):
         with patch("app.services.langchain_glm_service.ChatOpenAI") as ChatOpenAI:

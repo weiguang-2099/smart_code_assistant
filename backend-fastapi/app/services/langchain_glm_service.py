@@ -1,14 +1,17 @@
 """
-LangChain GLM Service - 智谱 AI LangChain 集成
+LLM Service - provider-agnostic LangChain integration.
 
-使用 OpenAI 兼容接口连接智谱 AI，支持 LangChain Agent 和 Tool Calling
+Both ZhipuAI and OpenAI are reached through the OpenAI-compatible chat
+protocol via ChatOpenAI; provider/model/base_url resolve from env config
+(see app/core/llm_config.py). Default provider remains ZhipuAI GLM.
 """
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from typing import List, Dict, Any, Optional
 from app.core.config import settings
+from app.core.llm_config import resolve_llm_config
 
-# 智谱 AI OpenAI 兼容接口配置
+# Backward-compat constants (existing imports elsewhere keep working)
 ZHIPUAI_BASE_URL = "https://open.bigmodel.cn/api/paas/v4/"
 ZHIPUAI_MODEL = "glm-4"
 ZHIPUAI_MODEL_PLUS = "glm-4-plus"
@@ -16,43 +19,51 @@ ZHIPUAI_MODEL_AIR = "glm-4-air"
 ZHIPUAI_MODEL_FLASH = "glm-4-flash"
 
 
-class LangChainGLMService:
-    """
-    基于 LangChain 的智谱 AI 服务
-
-    使用 ChatOpenAI 通过智谱 AI 的 OpenAI 兼容接口调用 GLM 模型
-    """
+class LLMService:
+    """Provider-agnostic chat service. LLM construction is deferred to first
+    use so the app (and the eval harness) can import this module without any
+    API key configured."""
 
     def __init__(
         self,
         api_key: Optional[str] = None,
-        base_url: str = ZHIPUAI_BASE_URL,
-        model: str = ZHIPUAI_MODEL,
+        base_url: Optional[str] = None,
+        model: Optional[str] = None,
         temperature: float = 0.7,
         max_tokens: Optional[int] = None,
+        tier: str = "default",
     ):
-        """
-        初始化 LangChain GLM 服务
-
-        Args:
-            api_key: 智谱 API 密钥，默认从配置读取
-            base_url: API 基础 URL，默认使用智谱兼容接口
-            model: 模型名称
-            temperature: 温度参数，控制随机性
-            max_tokens: 最大生成 token 数
-        """
-        self.api_key = api_key or settings.ZHIPUAI_API_KEY
-        if not self.api_key:
-            raise ValueError("ZHIPUAI_API_KEY not configured")
-
-        self.model = model
-        self.llm = ChatOpenAI(
-            api_key=self.api_key,
-            base_url=base_url,
-            model=model,
-            temperature=temperature,
-            max_tokens=max_tokens,
+        self._config = resolve_llm_config(
+            settings, tier, model=model, base_url=base_url, api_key=api_key
         )
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        self._llm: Optional[ChatOpenAI] = None
+
+    @property
+    def model(self) -> str:
+        return self._config.model
+
+    @property
+    def api_key(self) -> str:
+        return self._config.api_key
+
+    @property
+    def llm(self) -> ChatOpenAI:
+        if self._llm is None:
+            if not self._config.api_key:
+                raise ValueError(
+                    "No LLM API key configured. Set LLM_API_KEY "
+                    "(or ZHIPUAI_API_KEY for the zhipuai provider)."
+                )
+            self._llm = ChatOpenAI(
+                api_key=self._config.api_key,
+                base_url=self._config.base_url,
+                model=self._config.model,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+            )
+        return self._llm
 
     async def chat(
         self,
@@ -62,23 +73,22 @@ class LangChainGLMService:
         max_tokens: Optional[int] = None,
     ) -> str:
         """
-        简单对话 - 系统提示 + 用户提示
+        Simple conversation - system prompt + user prompt.
 
         Args:
-            system_prompt: 系统提示词
-            user_prompt: 用户输入
-            temperature: 温度参数（覆盖初始化值）
-            max_tokens: 最大 token 数（覆盖初始化值）
+            system_prompt: System prompt
+            user_prompt: User input
+            temperature: Temperature parameter (overrides init value)
+            max_tokens: Max token count (overrides init value)
 
         Returns:
-            AI 响应内容
+            AI response content
         """
         messages = [
             SystemMessage(content=system_prompt),
             HumanMessage(content=user_prompt),
         ]
 
-        # 动态设置参数
         kwargs = {}
         if temperature is not None:
             kwargs["temperature"] = temperature
@@ -95,15 +105,15 @@ class LangChainGLMService:
         max_tokens: Optional[int] = None,
     ) -> str:
         """
-        多轮对话 - 支持对话历史
+        Multi-turn conversation - supports conversation history.
 
         Args:
-            messages: 消息列表，格式: [{"role": "user", "content": "Hello"}]
-            temperature: 温度参数
-            max_tokens: 最大 token 数
+            messages: Message list, format: [{"role": "user", "content": "Hello"}]
+            temperature: Temperature parameter
+            max_tokens: Max token count
 
         Returns:
-            AI 响应内容
+            AI response content
         """
         lc_messages = []
         for msg in messages:
@@ -117,7 +127,6 @@ class LangChainGLMService:
             elif role == "assistant":
                 lc_messages.append(AIMessage(content=content))
 
-        # 动态设置参数
         kwargs = {}
         if temperature is not None:
             kwargs["temperature"] = temperature
@@ -134,22 +143,21 @@ class LangChainGLMService:
         system_prompt: Optional[str] = None,
     ) -> str:
         """
-        带历史记录的对话
+        Conversation with history.
 
         Args:
-            user_message: 当前用户消息
-            history: 对话历史
-            system_prompt: 系统提示词（可选）
+            user_message: Current user message
+            history: Conversation history
+            system_prompt: System prompt (optional)
 
         Returns:
-            AI 响应内容
+            AI response content
         """
         messages = []
 
         if system_prompt:
             messages.append(SystemMessage(content=system_prompt))
 
-        # 添加历史消息
         for msg in history:
             role = msg.get("role", "user")
             content = msg.get("content", "")
@@ -158,7 +166,6 @@ class LangChainGLMService:
             elif role == "assistant":
                 messages.append(AIMessage(content=content))
 
-        # 添加当前用户消息
         messages.append(HumanMessage(content=user_message))
 
         response = await self.llm.ainvoke(messages)
@@ -170,14 +177,14 @@ class LangChainGLMService:
         user_prompt: str,
     ):
         """
-        流式对话（生成器）
+        Streaming conversation (generator).
 
         Args:
-            system_prompt: 系统提示词
-            user_prompt: 用户输入
+            system_prompt: System prompt
+            user_prompt: User input
 
         Yields:
-            流式响应内容块
+            Streaming response content chunks
         """
         messages = [
             SystemMessage(content=system_prompt),
@@ -189,19 +196,20 @@ class LangChainGLMService:
 
     def get_llm(self):
         """
-        获取 LangChain LLM 实例，用于创建 Agent
+        Get LangChain LLM instance for creating Agents.
 
         Returns:
-            ChatOpenAI 实例
+            ChatOpenAI instance
         """
         return self.llm
 
 
-# 创建全局单例实例
-langchain_glm_service = LangChainGLMService()
+# Global singletons (names preserved; tier mapping per spec section 5.3)
+langchain_glm_service = LLMService(tier="default")
 
+glm_service_flash = LLMService(tier="fast")     # fast responses
+glm_service_plus = LLMService(tier="quality")   # high quality
+glm_service_air = LLMService(tier="light")      # lightweight
 
-# 创建不同模型的专用实例
-glm_service_flash = LangChainGLMService(model=ZHIPUAI_MODEL_FLASH)  # 快速响应
-glm_service_plus = LangChainGLMService(model=ZHIPUAI_MODEL_PLUS)    # 高质量
-glm_service_air = LangChainGLMService(model=ZHIPUAI_MODEL_AIR)      # 轻量级
+# Backward-compat alias
+LangChainGLMService = LLMService
