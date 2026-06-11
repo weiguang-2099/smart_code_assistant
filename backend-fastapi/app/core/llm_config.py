@@ -59,10 +59,11 @@ def resolve_llm_config(
     API key precedence: explicit > LLM_API_KEY > ZHIPUAI_API_KEY (backward
     compat with existing .env files).
     """
-    provider = (settings.LLM_PROVIDER or "zhipuai").lower()
+    raw_provider = settings.LLM_PROVIDER or "zhipuai"
+    provider = raw_provider.lower()
     if provider not in PROVIDER_PRESETS:
         raise ValueError(
-            f"Unknown LLM_PROVIDER {provider!r}; expected one of {sorted(PROVIDER_PRESETS)}"
+            f"Unknown LLM_PROVIDER {raw_provider!r}; expected one of {sorted(PROVIDER_PRESETS)}"
         )
     if tier not in TIERS:
         raise ValueError(f"Unknown tier {tier!r}; expected one of {TIERS}")
@@ -71,6 +72,6 @@ def resolve_llm_config(
     return LLMConfig(
         provider=provider,
         base_url=base_url or settings.LLM_BASE_URL or preset["base_url"],
-        model=model or getattr(settings, _TIER_ENV_FIELD[tier]) or preset["models"][tier],
+        model=model or getattr(settings, _TIER_ENV_FIELD[tier], "") or preset["models"][tier],
         api_key=api_key or settings.LLM_API_KEY or settings.ZHIPUAI_API_KEY or "",
     )
