@@ -21,7 +21,7 @@ from evals.config import (
 from evals.generation import GEN_PROMPT_VERSION
 from evals.golden_set.validate import validate_golden_set
 from evals.reporter import compute_aggregate, compute_generation_aggregate, render_table, write_json
-from evals.runner import load_golden_set, run_corpus
+from evals.runner import load_golden_set, run_corpus, run_generation_phase
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -140,10 +140,17 @@ async def main_async(args: argparse.Namespace) -> int:
                   "ZHIPUAI_API_KEY to be configured", file=sys.stderr)
             return 2
         from app.services.langchain_glm_service import LLMService
-        gen_llm = (LLMService(model=args.gen_model) if args.gen_model
-                   else LLMService(tier="default"))
-        judge_llm = (LLMService(model=args.judge_model) if args.judge_model
-                     else LLMService(tier="quality"))
+        try:
+            gen_llm = (LLMService(model=args.gen_model) if args.gen_model
+                       else LLMService(tier="default"))
+            judge_llm = (LLMService(model=args.judge_model) if args.judge_model
+                         else LLMService(tier="quality"))
+        except ValueError as exc:  # e.g. unknown LLM_PROVIDER
+            print(f"ERROR: cannot configure LLM: {exc}", file=sys.stderr)
+            return 2
+    elif args.gen_model or args.judge_model or args.gen_timeout != DEFAULT_GEN_TIMEOUT_S:
+        print("WARN: --gen-model/--judge-model/--gen-timeout have no effect "
+              "without --with-generation", file=sys.stderr)
 
     # 2. Optional indexing step
     if args.index_corpus:
@@ -172,7 +179,6 @@ async def main_async(args: argparse.Namespace) -> int:
     )
 
     if args.with_generation:
-        from evals.runner import run_generation_phase
         await run_generation_phase(
             results, gen_llm, judge_llm,
             concurrency=args.concurrency, timeout_s=args.gen_timeout,
