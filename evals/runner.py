@@ -8,6 +8,7 @@ from typing import Any, Optional
 
 from evals.config import (
     DEFAULT_CONCURRENCY,
+    DEFAULT_GEN_TIMEOUT_S,
     DEFAULT_PER_CASE_TIMEOUT_S,
     EVAL_PROJECT_ID,
     K_VALUES,
@@ -22,6 +23,9 @@ class CaseResult:
     category: str
     expected_files: list[str]
     expected_graph_neighbors: Optional[list[str]]
+    question: str = ""
+    combined_context: str = ""
+    generation: Optional[Any] = None  # GenerationResult when --with-generation
     retrieved_files_ranked: list[str] = field(default_factory=list)
     retrieved_graph_neighbors: list[str] = field(default_factory=list)
     metrics: dict[str, Any] = field(default_factory=dict)
@@ -184,6 +188,7 @@ async def run_one_case(
             id=case["id"], category=case["category"],
             expected_files=expected_files,
             expected_graph_neighbors=expected_neighbors,
+            question=case["question"],
             error="timeout",
         )
     except Exception as exc:
@@ -191,6 +196,7 @@ async def run_one_case(
             id=case["id"], category=case["category"],
             expected_files=expected_files,
             expected_graph_neighbors=expected_neighbors,
+            question=case["question"],
             error=f"{type(exc).__name__}: {exc}",
         )
 
@@ -203,6 +209,8 @@ async def run_one_case(
         id=case["id"], category=case["category"],
         expected_files=expected_files,
         expected_graph_neighbors=expected_neighbors,
+        question=case["question"],
+        combined_context=raw.get("combined_context") or "",
         retrieved_files_ranked=retrieved_files,
         retrieved_graph_neighbors=retrieved_neighbors,
         metrics=metrics,
@@ -231,3 +239,37 @@ async def run_corpus(
             )
 
     return await asyncio.gather(*(bounded(c) for c in cases))
+
+
+async def run_generation_phase(
+    results: list[CaseResult],
+    gen_llm,
+    judge_llm,
+    *,
+    concurrency: int = DEFAULT_CONCURRENCY,
+    timeout_s: float = DEFAULT_GEN_TIMEOUT_S,
+) -> None:
+    """Annotate each CaseResult.generation in place. Cases whose retrieval
+    errored are skipped (no context to generate from); their retrieval error
+    is preserved and the skip is recorded. Per-case budget covers generation
+    plus both judge calls (spec section 7.4)."""
+    from evals.generation import GenerationResult, generate_and_judge
+
+    semaphore = asyncio.Semaphore(concurrency)
+
+    async def bounded(r: CaseResult) -> None:
+        if r.error:
+            r.generation = GenerationResult(error=f"skipped: retrieval error ({r.error})")
+            return
+        async with semaphore:
+            try:
+                r.generation = await asyncio.wait_for(
+                    generate_and_judge(r.question, r.combined_context, gen_llm, judge_llm),
+                    timeout=timeout_s,
+                )
+            except asyncio.TimeoutError:
+                r.generation = GenerationResult(error="timeout")
+            except Exception as exc:
+                r.generation = GenerationResult(error=f"{type(exc).__name__}: {exc}")
+
+    await asyncio.gather(*(bounded(r) for r in results))
