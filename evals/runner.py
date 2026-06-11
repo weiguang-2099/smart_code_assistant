@@ -45,6 +45,8 @@ def _flatten_semantic_results(semantic_results) -> list[dict]:
     per-collection lists into one ranking by relevance_score (descending,
     chromadb_client.py:239 — higher is better). Flat lists (unit fixtures and
     any future pre-merged source) pass through with non-dict items dropped."""
+    if not semantic_results:
+        return []
     if isinstance(semantic_results, dict):
         merged = []
         for chunks in semantic_results.values():

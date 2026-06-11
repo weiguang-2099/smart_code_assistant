@@ -20,6 +20,9 @@ class TestDictShape:
     def test_empty_dict(self):
         assert extract_files_from_retrieval({}) == []
 
+    def test_none_returns_empty(self):
+        assert extract_files_from_retrieval(None) == []
+
     def test_missing_relevance_score_sorts_last(self):
         semantic_results = {
             "functions": [{"metadata": {"module_path": "app/x.py"}}],
