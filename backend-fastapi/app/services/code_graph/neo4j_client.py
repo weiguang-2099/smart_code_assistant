@@ -478,6 +478,127 @@ class Neo4jClient:
 
         return graph_context
 
+    async def get_entity_neighbors(
+        self,
+        seeds: List[Dict[str, Any]],
+        max_depth: int = 2,
+        limit: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """Return real graph neighbors of semantic-hit seed entities.
+
+        ``seeds`` are descriptors {name, module_path, class_name, type,
+        relevance_score} taken from the top semantic hits. Returns flat records
+        {name, module_path, relation, source} where ``relation`` is one of
+        callee/caller/method/parent/child/import. Results are deduped by name,
+        ranked by the seeding hit's relevance_score (then relation priority),
+        and capped at ``limit``.
+        """
+        relation_priority = {
+            "callee": 0, "caller": 1, "import": 2,
+            "method": 3, "parent": 4, "child": 5,
+        }
+        candidates: List[tuple] = []  # (score, priority, record)
+
+        def add(score, relation, name, module_path, source):
+            if not name:
+                return
+            candidates.append((
+                score, relation_priority[relation],
+                {"name": name, "module_path": module_path,
+                 "relation": relation, "source": source},
+            ))
+
+        for seed in seeds:
+            name = seed.get("name")
+            module_path = seed.get("module_path")
+            stype = seed.get("type")
+            score = seed.get("relevance_score") or 0.0
+            if not name:
+                continue
+
+            try:
+                if stype == "function":
+                    callees = await self.execute_query(
+                        f"""
+                        MATCH (f:Function {{name: $name, module_path: $module_path}})
+                              -[:CALLS*1..{max_depth}]->(callee:Function)
+                        RETURN DISTINCT callee.name AS name, callee.module_path AS module_path
+                        """,
+                        {"name": name, "module_path": module_path},
+                    )
+                    for r in callees:
+                        add(score, "callee", r.get("name"), r.get("module_path"), name)
+
+                    callers = await self.execute_query(
+                        f"""
+                        MATCH (caller:Function)-[:CALLS*1..{max_depth}]->
+                              (f:Function {{name: $name, module_path: $module_path}})
+                        RETURN DISTINCT caller.name AS name, caller.module_path AS module_path
+                        """,
+                        {"name": name, "module_path": module_path},
+                    )
+                    for r in callers:
+                        add(score, "caller", r.get("name"), r.get("module_path"), name)
+
+                elif stype == "class":
+                    methods = await self.execute_query(
+                        """
+                        MATCH (c:Class {name: $name, module_path: $module_path})-[:HAS_METHOD]->(m:Function)
+                        RETURN DISTINCT m.name AS name, m.module_path AS module_path
+                        """,
+                        {"name": name, "module_path": module_path},
+                    )
+                    for r in methods:
+                        add(score, "method", r.get("name"), r.get("module_path"), name)
+
+                    parents = await self.execute_query(
+                        f"""
+                        MATCH (c:Class {{name: $name, module_path: $module_path}})
+                              -[:INHERITS_FROM*1..{max_depth}]->(p:Class)
+                        RETURN DISTINCT p.name AS name, p.module_path AS module_path
+                        """,
+                        {"name": name, "module_path": module_path},
+                    )
+                    for r in parents:
+                        add(score, "parent", r.get("name"), r.get("module_path"), name)
+
+                    children = await self.execute_query(
+                        f"""
+                        MATCH (child:Class)-[:INHERITS_FROM*1..{max_depth}]->
+                              (c:Class {{name: $name, module_path: $module_path}})
+                        RETURN DISTINCT child.name AS name, child.module_path AS module_path
+                        """,
+                        {"name": name, "module_path": module_path},
+                    )
+                    for r in children:
+                        add(score, "child", r.get("name"), r.get("module_path"), name)
+
+                if module_path:
+                    imports = await self.execute_query(
+                        """
+                        MATCH (m:Module {path: $module_path})-[:HAS_IMPORT]->(i:Import)
+                        RETURN i.names AS names
+                        """,
+                        {"module_path": module_path},
+                    )
+                    for r in imports:
+                        for sym in (r.get("names") or []):
+                            add(score, "import", sym, None, name)
+            except Exception as e:  # pragma: no cover - defensive per-seed isolation
+                logger.warning(f"Neighbor query failed for seed {name}: {e}")
+
+        candidates.sort(key=lambda t: (-t[0], t[1]))
+        out: List[Dict[str, Any]] = []
+        seen = set()
+        for _, _, rec in candidates:
+            if rec["name"] in seen:
+                continue
+            seen.add(rec["name"])
+            out.append(rec)
+            if len(out) >= limit:
+                break
+        return out
+
     async def get_graph_stats(self, project_id: Optional[int] = None) -> Dict[str, int]:
         """获取图谱统计信息"""
         stats = {}
