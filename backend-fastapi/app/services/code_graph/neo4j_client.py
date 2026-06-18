@@ -207,6 +207,9 @@ class Neo4jClient:
         alias: Optional[str] = None
     ) -> Dict[str, Any]:
         """创建导入节点"""
+        # Neo4j refuses MERGE on a null property; imports without an alias
+        # (the common case) merge on an empty-string alias instead so that
+        # ``import os`` and ``import os as o`` remain distinct nodes.
         query = """
         MERGE (i:Import {module: $import_module, alias: $alias, module_path: $module_path})
         WITH i
@@ -217,7 +220,7 @@ class Neo4jClient:
         result = await self.execute_query(query, {
             "module_path": module_path,
             "import_module": import_module,
-            "alias": alias
+            "alias": alias or ""
         })
         return result[0] if result else None
 
