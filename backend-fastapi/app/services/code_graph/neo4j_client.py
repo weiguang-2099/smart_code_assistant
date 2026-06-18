@@ -518,13 +518,21 @@ class Neo4jClient:
 
             try:
                 if stype == "function":
+                    class_name = seed.get("class_name")
+                    if class_name:
+                        fkey = "{name: $name, module_path: $module_path, class_name: $class_name}"
+                        fparams = {"name": name, "module_path": module_path, "class_name": class_name}
+                    else:
+                        fkey = "{name: $name, module_path: $module_path}"
+                        fparams = {"name": name, "module_path": module_path}
+
                     callees = await self.execute_query(
                         f"""
-                        MATCH (f:Function {{name: $name, module_path: $module_path}})
+                        MATCH (f:Function {fkey})
                               -[:CALLS*1..{max_depth}]->(callee:Function)
                         RETURN DISTINCT callee.name AS name, callee.module_path AS module_path
                         """,
-                        {"name": name, "module_path": module_path},
+                        fparams,
                     )
                     for r in callees:
                         add(score, "callee", r.get("name"), r.get("module_path"), name)
@@ -532,10 +540,10 @@ class Neo4jClient:
                     callers = await self.execute_query(
                         f"""
                         MATCH (caller:Function)-[:CALLS*1..{max_depth}]->
-                              (f:Function {{name: $name, module_path: $module_path}})
+                              (f:Function {fkey})
                         RETURN DISTINCT caller.name AS name, caller.module_path AS module_path
                         """,
-                        {"name": name, "module_path": module_path},
+                        fparams,
                     )
                     for r in callers:
                         add(score, "caller", r.get("name"), r.get("module_path"), name)
@@ -588,6 +596,9 @@ class Neo4jClient:
                 logger.warning(f"Neighbor query failed for seed {name}: {e}")
 
         candidates.sort(key=lambda t: (-t[0], t[1]))
+        # Dedup by bare name (not name+module_path) on purpose: downstream the
+        # eval metric and the generation context treat neighbors as bare symbol
+        # names, so keeping distinct names maximizes coverage under `limit`.
         out: List[Dict[str, Any]] = []
         seen = set()
         for _, _, rec in candidates:

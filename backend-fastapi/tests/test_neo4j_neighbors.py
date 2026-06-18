@@ -1,6 +1,4 @@
 """Unit tests for Neo4jClient.get_entity_neighbors (execute_query mocked)."""
-from unittest.mock import AsyncMock
-
 import pytest
 
 from app.services.code_graph.neo4j_client import Neo4jClient
@@ -83,3 +81,23 @@ async def test_higher_relevance_seed_ranked_first():
     ]
     out = await client.get_entity_neighbors(seeds, max_depth=1, limit=10)
     assert out[0]["name"] == "callee_of_high"
+
+
+@pytest.mark.asyncio
+async def test_method_seed_includes_class_name_in_match():
+    client = Neo4jClient()
+    captured = []
+
+    async def fake_execute(query, params=None):
+        captured.append((query, params))
+        return []
+
+    client.execute_query = fake_execute
+    seeds = [{"name": "process", "module_path": "app/x.py", "class_name": "Worker",
+              "type": "function", "relevance_score": 0.7}]
+    await client.get_entity_neighbors(seeds, max_depth=2, limit=20)
+    callee_calls = [(q, p) for q, p in captured if "->(callee:Function)" in q]
+    assert callee_calls, "callee query should have run"
+    q, p = callee_calls[0]
+    assert "class_name" in q
+    assert p.get("class_name") == "Worker"
