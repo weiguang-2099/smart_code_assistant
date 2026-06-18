@@ -19,6 +19,15 @@ if str(PROJECT_ROOT) not in sys.path:
 
 
 @pytest.fixture(autouse=True)
+async def _clear_retrieval_cache():
+    """Clear the in-memory retrieval cache before every test to prevent cache pollution."""
+    from app.core.cache import global_cache_manager
+    await global_cache_manager.clear()
+    yield
+    await global_cache_manager.clear()
+
+
+@pytest.fixture(autouse=True)
 def _isolated_test_env(monkeypatch):
     """
     Provide deterministic environment for every test - no real secrets, no real services.
