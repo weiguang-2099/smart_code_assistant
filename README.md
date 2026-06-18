@@ -52,7 +52,7 @@ An AI-powered code generation, review, and analysis platform built with FastAPI,
 |-------|-----------|
 | Frontend | React 19, TypeScript, Vite 7, Tailwind CSS 4 |
 | Backend | Python, FastAPI, SQLAlchemy 2.0 (async), Alembic |
-| AI/LLM | LangChain, LangGraph, ZhipuAI GLM-4 |
+| AI/LLM | LangChain, ZhipuAI GLM-4 / OpenAI (switchable provider); LangGraph agent rewrite planned |
 | Relational DB | MySQL 8.0 (via aiomysql) |
 | Graph DB | Neo4j 5.15 (code knowledge graph) |
 | Vector DB | ChromaDB (semantic search) |
@@ -146,6 +146,52 @@ python scripts/benchmark.py
 
 For HTTP-level load testing see [`load-tests/README.md`](./load-tests/README.md) (k6 scenarios with built-in latency/error-rate thresholds).
 
+## Evaluation
+
+The repo ships a runnable eval harness (`evals/`) that measures the GraphRAG pipeline against a hand-written golden set of 50 questions about this codebase. Retrieval is scored automatically against expected files and graph neighbors; generation is scored by an LLM-as-judge using two reference-free metrics (faithfulness to the retrieved context, and answer relevance to the question). The numbers below are a real run against live Neo4j and ChromaDB, not mocked.
+
+### Retrieval (golden set, git `0d297e4`, 2026-06-18, n=50, 0 errors)
+
+| Metric | Value |
+|---|---:|
+| hit_rate@1 | 0.42 |
+| hit_rate@5 | 0.60 |
+| hit_rate@10 | 0.66 |
+| recall@5 | 0.50 |
+| mrr | 0.50 |
+| hybrid_hit_rate@5 | 0.60 |
+| graph_neighbor_recall | 0.10 |
+
+### Generation (GLM-4 generator, GLM-4-plus judge, prompt v1, n=50)
+
+| Metric | Mean (1-5) | Share >= 4 |
+|---|---:|---:|
+| faithfulness | 4.64 | 84% |
+| answer_relevance | 3.48 | 54% |
+
+Faithfulness is high (answers stay grounded in the retrieved context); answer relevance is the weaker axis, which tracks the retrieval gaps below. The run had 0 generation errors and 0 judge parse failures.
+
+### By category
+
+| Category | n | hit_rate@5 | recall@5 | mrr | faithfulness | answer_relevance |
+|---|---:|---:|---:|---:|---:|---:|
+| definition_lookup | 12 | 0.50 | 0.50 | 0.47 | 5.00 | 4.17 |
+| feature_lookup | 12 | 0.67 | 0.67 | 0.56 | 4.67 | 3.17 |
+| dependency_trace | 10 | 0.40 | 0.35 | 0.29 | 4.60 | 2.60 |
+| impact_analysis | 8 | 1.00 | 0.54 | 0.78 | 4.00 | 4.00 |
+| cross_file_flow | 8 | 0.50 | 0.38 | 0.46 | 4.75 | 3.50 |
+
+The breakdown is the point of the harness: `impact_analysis` retrieves cleanly (hit_rate@5 1.00), while `dependency_trace` is the weakest end to end (recall@5 0.35, answer_relevance 2.60). Graph-neighbor metrics are low overall (graph_neighbor_recall 0.10, graph_traversal_correctness 0.08) because graph traversal currently contributes little beyond semantic search; improving that is the explicit target of the Phase 2 retrieval and LangGraph-agent work.
+
+Reproduce: `docker compose up -d`, index the corpus once, then run with generation:
+
+```bash
+python -m evals.run --golden evals/golden_set/backend_fastapi.jsonl --index-corpus backend-fastapi/app
+python -m evals.run --golden evals/golden_set/backend_fastapi.jsonl --with-generation
+```
+
+Generation evals are opt-in (they need `ZHIPUAI_API_KEY` and cost a few GLM calls) and never run in CI; retrieval-only runs are cheap and deterministic. The eval index is isolated under `project_id=99999` in ChromaDB so it never mixes with dev data. By default the generator and judge are the same model family (GLM); the switchable provider abstraction (`LLM_PROVIDER=openai`) allows re-judging with a disjoint family as a cross-check.
+
 ## Getting Started
 
 ### Prerequisites
@@ -233,6 +279,9 @@ Key configuration options (set in `backend-fastapi/.env`):
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `ZHIPU_API_KEY` | ZhipuAI API key | - |
+| `LLM_PROVIDER` | LLM provider: `zhipuai` or `openai` | `zhipuai` |
+| `LLM_API_KEY` | Provider API key (falls back to `ZHIPUAI_API_KEY`) | _(unset)_ |
+| `LLM_MODEL` | Override default-tier model (else provider preset) | _(unset)_ |
 | `DATABASE_URL` | MySQL connection string | `mysql+aiomysql://...` |
 | `NEO4J_URI` | Neo4j Bolt URI | `bolt://localhost:7687` |
 | `CHROMA_HOST` | ChromaDB host | `localhost` |

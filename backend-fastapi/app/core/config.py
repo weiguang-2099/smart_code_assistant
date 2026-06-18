@@ -1,6 +1,12 @@
 from pydantic_settings import BaseSettings
 from typing import Optional, List
 from functools import lru_cache
+from pathlib import Path
+
+# Absolute path to backend-fastapi/.env so settings load identically whether
+# the app is launched from backend-fastapi/ or a tool (e.g. the evals harness)
+# runs from the repo root.
+_ENV_FILE = str(Path(__file__).resolve().parents[2] / ".env")
 
 
 class Settings(BaseSettings):
@@ -67,6 +73,18 @@ class Settings(BaseSettings):
     # ZhipuAI Configuration
     ZHIPUAI_API_KEY: str = ""
 
+    # LLM Provider Configuration
+    # LLM_PROVIDER: "zhipuai" (default) or "openai".
+    # LLM_API_KEY falls back to ZHIPUAI_API_KEY when empty (backward compat).
+    # Empty model/base_url fields resolve to per-provider presets (app/core/llm_config.py).
+    LLM_PROVIDER: str = "zhipuai"
+    LLM_API_KEY: str = ""
+    LLM_BASE_URL: str = ""
+    LLM_MODEL: str = ""
+    LLM_MODEL_FAST: str = ""
+    LLM_MODEL_QUALITY: str = ""
+    LLM_MODEL_LIGHT: str = ""
+
     # Datalab (Marker) API Configuration
     DATALAB_API_KEY: str = ""
     DATALAB_API_URL: str = "https://www.datalab.to/api/v1/marker"
@@ -91,7 +109,7 @@ class Settings(BaseSettings):
     CODE_GRAPH_ENABLE_SEMANTIC_SEARCH: bool = True   # 启用语义搜索
 
     class Config:
-        env_file = ".env"
+        env_file = _ENV_FILE
         env_file_encoding = "utf-8"
         case_sensitive = True
 

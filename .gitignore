@@ -109,3 +109,7 @@ temp/
 
 # === Trae ===
 .trae/
+
+# Evals runtime output
+evals/results/*.json
+evals/golden_set/*.draft.jsonl
