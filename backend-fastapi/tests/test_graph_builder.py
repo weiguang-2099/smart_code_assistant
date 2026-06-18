@@ -89,6 +89,15 @@ class TestBuildFromCode:
         # vector_indexed should be 0 because the chroma error was swallowed.
         assert result["stats"].get("vector_indexed", 0) == 0
 
+    @pytest.mark.asyncio
+    async def test_import_names_passed_to_create_import(self, builder, mock_neo4j):
+        # SAMPLE has "from typing import List" -> names ["List"], "import os" -> names []
+        await builder.build_from_code(SAMPLE, "python", project_id=1, module_path="m.py")
+        calls = mock_neo4j.create_import.await_args_list
+        names_by_module = {c.kwargs["import_module"]: c.kwargs.get("names") for c in calls}
+        assert names_by_module.get("typing") == ["List"]
+        assert names_by_module.get("os") == []
+
 
 class TestBuildFromFiles:
     @pytest.mark.asyncio

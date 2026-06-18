@@ -142,7 +142,8 @@ class CodeGraphBuilder:
                 await neo4j.create_import(
                     module_path=module_path,
                     import_module=imp.module,
-                    alias=imp.alias
+                    alias=imp.alias,
+                    names=imp.names,
                 )
                 stats["imports_created"] += 1
 
