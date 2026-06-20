@@ -51,7 +51,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--gen-model", type=str, default=None,
                    help="Override generator model (default: provider 'default' tier)")
     p.add_argument("--judge-model", type=str, default=None,
-                   help="Override judge model (default: provider 'quality' tier)")
+                   help="Override judge model (default: glm-5.1, kept distinct from the generator)")
     p.add_argument("--gen-timeout", type=float, default=DEFAULT_GEN_TIMEOUT_S,
                    help="Per-case generation+judge budget in seconds")
     return p.parse_args(argv)
@@ -143,8 +143,10 @@ async def main_async(args: argparse.Namespace) -> int:
         try:
             gen_llm = (LLMService(model=args.gen_model) if args.gen_model
                        else LLMService(tier="default"))
+            # Judge pinned to glm-5.1, deliberately distinct from the glm-5.2
+            # generator (default tier), to avoid self-grading bias.
             judge_llm = (LLMService(model=args.judge_model) if args.judge_model
-                         else LLMService(tier="quality"))
+                         else LLMService(model="glm-5.1"))
         except ValueError as exc:  # e.g. unknown LLM_PROVIDER
             print(f"ERROR: cannot configure LLM: {exc}", file=sys.stderr)
             return 2

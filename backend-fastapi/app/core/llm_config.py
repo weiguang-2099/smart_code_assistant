@@ -11,10 +11,10 @@ PROVIDER_PRESETS = {
     "zhipuai": {
         "base_url": "https://open.bigmodel.cn/api/paas/v4/",
         "models": {
-            "default": "glm-4",
-            "fast": "glm-4-flash",
-            "quality": "glm-4-plus",
-            "light": "glm-4-air",
+            "default": "glm-5.2",
+            "fast": "glm-4.7",
+            "quality": "glm-5.2",
+            "light": "glm-5.1",
         },
     },
     "openai": {
