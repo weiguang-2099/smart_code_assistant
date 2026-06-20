@@ -166,28 +166,28 @@ Before is the pre-traversal regex graph path (git `0d297e4`, 2026-06-18); after 
 
 graph_neighbor_recall nearly tripled (0.10 -> 0.29) and graph_traversal_correctness tripled (0.08 -> 0.24): the graph branch now walks real CALLS / inheritance / import edges from the semantic seeds instead of regex-matching entity names out of the question. Semantic-retrieval metrics moved only slightly (a re-indexing effect), since this work targets the graph branch.
 
-### Generation (GLM-4 generator, GLM-4-plus judge, prompt v1, n=50, 2026-06-18 baseline)
+### Generation (GLM-5.2 generator, GLM-5.1 judge, prompt v1, n=50, 2026-06-20)
 
 | Metric | Mean (1-5) | Share >= 4 |
 |---|---:|---:|
-| faithfulness | 4.64 | 84% |
-| answer_relevance | 3.48 | 54% |
+| faithfulness | 4.76 | 92% |
+| answer_relevance | 3.66 | 56% |
 
-Faithfulness is high (answers stay grounded in the retrieved context); answer relevance is the weaker axis, which tracks the retrieval gaps below. The run had 0 generation errors and 0 judge parse failures.
+Faithfulness is high (answers stay grounded in the retrieved context); answer relevance is the weaker axis, which tracks the retrieval gaps below. Upgrading the generator to GLM-5.2 and the judge to GLM-5.1 (kept on different models to avoid self-grading bias) lifted faithfulness 4.64 -> 4.76 and answer_relevance 3.48 -> 3.66 over the 2026-06-18 GLM-4 / GLM-4-plus baseline. The run had 0 generation errors and 0 judge parse failures.
 
 ### By category
 
-Retrieval columns are the 2026-06-20 run; faithfulness and answer_relevance are the 2026-06-18 generation baseline (not re-run).
+All columns are the 2026-06-20 run (retrieval re-indexed; generation with GLM-5.2 / GLM-5.1).
 
 | Category | n | hit_rate@5 | recall@5 | mrr | faithfulness | answer_relevance |
 |---|---:|---:|---:|---:|---:|---:|
-| definition_lookup | 12 | 0.50 | 0.50 | 0.47 | 5.00 | 4.17 |
-| feature_lookup | 12 | 0.75 | 0.75 | 0.63 | 4.67 | 3.17 |
-| dependency_trace | 10 | 0.40 | 0.35 | 0.29 | 4.60 | 2.60 |
-| impact_analysis | 8 | 1.00 | 0.54 | 0.78 | 4.00 | 4.00 |
-| cross_file_flow | 8 | 0.63 | 0.42 | 0.50 | 4.75 | 3.50 |
+| definition_lookup | 12 | 0.50 | 0.50 | 0.47 | 4.67 | 4.33 |
+| feature_lookup | 12 | 0.75 | 0.75 | 0.63 | 5.00 | 2.17 |
+| dependency_trace | 10 | 0.40 | 0.35 | 0.29 | 5.00 | 3.90 |
+| impact_analysis | 8 | 1.00 | 0.54 | 0.78 | 5.00 | 4.25 |
+| cross_file_flow | 8 | 0.63 | 0.42 | 0.50 | 4.00 | 4.00 |
 
-The breakdown is the point of the harness: `impact_analysis` retrieves cleanly (hit_rate@5 1.00), while `dependency_trace` is the weakest end to end (recall@5 0.35, answer_relevance 2.60). Graph-neighbor metrics rose sharply after the traversal rework (graph_neighbor_recall 0.10 -> 0.29, graph_traversal_correctness 0.08 -> 0.24), and the harness then localized the remaining ceiling precisely: for "how does X work" questions the embedding model often ranks schema/exception classes (e.g. `UserRegister`, `TokenVersionManager`) above the endpoint or service function whose call/import neighbors actually answer the question, so the graph traversal seeds from the wrong nodes. That seed-selection problem -- not the graph itself -- is the dominant remaining lever, and is the explicit target of the Phase 2 hybrid-search / reranking work.
+The breakdown is the point of the harness: `impact_analysis` retrieves cleanly (hit_rate@5 1.00), while `dependency_trace` is the weakest on retrieval (recall@5 0.35), and `feature_lookup` has the lowest answer_relevance (2.17) despite strong retrieval -- a grounding gap, not a retrieval one. Graph-neighbor metrics rose sharply after the traversal rework (graph_neighbor_recall 0.10 -> 0.29, graph_traversal_correctness 0.08 -> 0.24), and the harness then localized the remaining ceiling precisely: for "how does X work" questions the embedding model often ranks schema/exception classes (e.g. `UserRegister`, `TokenVersionManager`) above the endpoint or service function whose call/import neighbors actually answer the question, so the graph traversal seeds from the wrong nodes. That seed-selection problem -- not the graph itself -- is the dominant remaining lever, and is the explicit target of the Phase 2 hybrid-search / reranking work.
 
 **Known limitations.**
 - *Seeding dominates the graph-neighbor ceiling.* Traversal is seeded from the top semantic hits, so when semantic search surfaces the wrong node type (a schema class instead of the calling function), the right neighbors are never reached even though they exist in the graph. Verified by hand: seeding `register` directly yields its `get_password_hash` / `create_token_pair` neighbors at recall ~1.0.
