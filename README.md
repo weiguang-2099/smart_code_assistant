@@ -150,19 +150,23 @@ For HTTP-level load testing see [`load-tests/README.md`](./load-tests/README.md)
 
 The repo ships a runnable eval harness (`evals/`) that measures the GraphRAG pipeline against a hand-written golden set of 50 questions about this codebase. Retrieval is scored automatically against expected files and graph neighbors; generation is scored by an LLM-as-judge using two reference-free metrics (faithfulness to the retrieved context, and answer relevance to the question). The numbers below are a real run against live Neo4j and ChromaDB, not mocked.
 
-### Retrieval (golden set, git `0d297e4`, 2026-06-18, n=50, 0 errors)
+### Retrieval (golden set, n=50, 0 errors)
 
-| Metric | Value |
-|---|---:|
-| hit_rate@1 | 0.42 |
-| hit_rate@5 | 0.60 |
-| hit_rate@10 | 0.66 |
-| recall@5 | 0.50 |
-| mrr | 0.50 |
-| hybrid_hit_rate@5 | 0.60 |
-| graph_neighbor_recall | 0.10 |
+Before is the pre-traversal regex graph path (git `0d297e4`, 2026-06-18); after is real graph-neighbor traversal seeded from the top semantic hits, plus import-name indexing and the module-level CALLS fix (2026-06-20), re-indexed against live Neo4j and ChromaDB.
 
-### Generation (GLM-4 generator, GLM-4-plus judge, prompt v1, n=50)
+| Metric | Before (2026-06-18) | After (2026-06-20) |
+|---|---:|---:|
+| hit_rate@1 | 0.42 | 0.44 |
+| hit_rate@5 | 0.60 | 0.64 |
+| recall@5 | 0.50 | 0.52 |
+| mrr | 0.50 | 0.53 |
+| hybrid_hit_rate@5 | 0.60 | 0.64 |
+| graph_neighbor_recall | 0.10 | 0.29 |
+| graph_traversal_correctness | 0.08 | 0.24 |
+
+graph_neighbor_recall nearly tripled (0.10 -> 0.29) and graph_traversal_correctness tripled (0.08 -> 0.24): the graph branch now walks real CALLS / inheritance / import edges from the semantic seeds instead of regex-matching entity names out of the question. Semantic-retrieval metrics moved only slightly (a re-indexing effect), since this work targets the graph branch.
+
+### Generation (GLM-4 generator, GLM-4-plus judge, prompt v1, n=50, 2026-06-18 baseline)
 
 | Metric | Mean (1-5) | Share >= 4 |
 |---|---:|---:|
@@ -173,15 +177,22 @@ Faithfulness is high (answers stay grounded in the retrieved context); answer re
 
 ### By category
 
+Retrieval columns are the 2026-06-20 run; faithfulness and answer_relevance are the 2026-06-18 generation baseline (not re-run).
+
 | Category | n | hit_rate@5 | recall@5 | mrr | faithfulness | answer_relevance |
 |---|---:|---:|---:|---:|---:|---:|
 | definition_lookup | 12 | 0.50 | 0.50 | 0.47 | 5.00 | 4.17 |
-| feature_lookup | 12 | 0.67 | 0.67 | 0.56 | 4.67 | 3.17 |
+| feature_lookup | 12 | 0.75 | 0.75 | 0.63 | 4.67 | 3.17 |
 | dependency_trace | 10 | 0.40 | 0.35 | 0.29 | 4.60 | 2.60 |
 | impact_analysis | 8 | 1.00 | 0.54 | 0.78 | 4.00 | 4.00 |
-| cross_file_flow | 8 | 0.50 | 0.38 | 0.46 | 4.75 | 3.50 |
+| cross_file_flow | 8 | 0.63 | 0.42 | 0.50 | 4.75 | 3.50 |
 
-The breakdown is the point of the harness: `impact_analysis` retrieves cleanly (hit_rate@5 1.00), while `dependency_trace` is the weakest end to end (recall@5 0.35, answer_relevance 2.60). Graph-neighbor metrics are low overall (graph_neighbor_recall 0.10, graph_traversal_correctness 0.08) because graph traversal currently contributes little beyond semantic search; improving that is the explicit target of the Phase 2 retrieval and LangGraph-agent work.
+The breakdown is the point of the harness: `impact_analysis` retrieves cleanly (hit_rate@5 1.00), while `dependency_trace` is the weakest end to end (recall@5 0.35, answer_relevance 2.60). Graph-neighbor metrics rose sharply after the traversal rework (graph_neighbor_recall 0.10 -> 0.29, graph_traversal_correctness 0.08 -> 0.24), and the harness then localized the remaining ceiling precisely: for "how does X work" questions the embedding model often ranks schema/exception classes (e.g. `UserRegister`, `TokenVersionManager`) above the endpoint or service function whose call/import neighbors actually answer the question, so the graph traversal seeds from the wrong nodes. That seed-selection problem -- not the graph itself -- is the dominant remaining lever, and is the explicit target of the Phase 2 hybrid-search / reranking work.
+
+**Known limitations.**
+- *Seeding dominates the graph-neighbor ceiling.* Traversal is seeded from the top semantic hits, so when semantic search surfaces the wrong node type (a schema class instead of the calling function), the right neighbors are never reached even though they exist in the graph. Verified by hand: seeding `register` directly yields its `get_password_hash` / `create_token_pair` neighbors at recall ~1.0.
+- *Class instantiation and same-file usage are not edges.* Neighbors reachable only through instantiation (`Neo4jClient()`, `ChromaDBClient()`) or a class defined and used in the same file (`MetricsCollector`) are not yet modeled, so those expectations stay at zero by design. Modeling instantiation/usage is the next graph iteration.
+- *Eval isolation.* Graph nodes are indexed under `project_id=99999`; unlike ChromaDB collections, cross-project node isolation in Neo4j is not enforced.
 
 Reproduce: `docker compose up -d`, index the corpus once, then run with generation:
 
