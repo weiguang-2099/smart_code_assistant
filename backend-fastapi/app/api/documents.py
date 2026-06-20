@@ -3,6 +3,7 @@ Document API routes for managing user documents with version control.
 """
 import re
 from datetime import datetime
+from types import SimpleNamespace
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy import select, func, delete, or_
@@ -86,7 +87,9 @@ def build_outline_tree(headings: List[OutlineItem]) -> List[OutlineItem]:
     if not headings:
         return []
 
-    root = OutlineItem(level=0, text="", anchor="", children=[])
+    # Sentinel root: a plain holder, not an OutlineItem (whose schema requires
+    # level >= 1). Only its `.level` and `.children` are used by the algorithm.
+    root = SimpleNamespace(level=0, children=[])
     stack = [root]
 
     for heading in headings:
