@@ -16,6 +16,7 @@ from app.core.cache import global_cache_manager
 logger = logging.getLogger(__name__)
 
 RETRIEVAL_CACHE_TTL = 300
+GRAPH_SEED_COUNT = 5  # number of top semantic hits used to seed graph traversal
 
 
 class CodeGraphRetriever:
@@ -88,25 +89,19 @@ class CodeGraphRetriever:
                     logger.warning(f"Semantic search failed: {e}")
             return {}
 
-        async def graph_traversal():
-            if not include_graph_context:
-                return None
+        # Semantic search first; the graph branch seeds from its hits.
+        semantic_results = await semantic_search()
+        result["semantic_results"] = semantic_results
 
+        graph_context = None
+        if include_graph_context:
             try:
                 neo4j = await self._get_neo4j()
-                entity_names = self._extract_entity_names(query)
-                return await neo4j.batch_get_entity_context(entity_names[:3])
+                seeds = self._seed_entities_from_semantic(semantic_results, GRAPH_SEED_COUNT)
+                graph_context = await neo4j.get_entity_neighbors(seeds, max_depth=max_depth)
             except Exception as e:
                 logger.warning(f"Graph traversal failed: {e}")
-                return None
-
-        semantic_results, graph_context = await asyncio.gather(
-            semantic_search(),
-            graph_traversal(),
-            return_exceptions=False
-        )
-
-        result["semantic_results"] = semantic_results
+                graph_context = None
         result["graph_context"] = graph_context
 
         result["combined_context"] = self._build_combined_context(result)
@@ -117,39 +112,29 @@ class CodeGraphRetriever:
         return result
 
 
-    def _extract_entity_names(self, query: str) -> List[str]:
-        """从查询中提取可能的实体名称"""
-        import re
+    def _seed_entities_from_semantic(self, semantic_results, n: int) -> list:
+        """Pick the top-n semantic hits (merged across collections, ranked by
+        relevance_score) and map each to a graph-node seed descriptor."""
+        chunks = []
+        if isinstance(semantic_results, dict):
+            for lst in semantic_results.values():
+                if isinstance(lst, list):
+                    chunks.extend(c for c in lst if isinstance(c, dict))
+        elif isinstance(semantic_results, list):
+            chunks = [c for c in semantic_results if isinstance(c, dict)]
+        chunks.sort(key=lambda c: c.get("relevance_score", 0), reverse=True)
 
-        # 提取可能的函数名/类名（驼峰命名或下划线命名）
-        patterns = [
-            r'\b([a-z_][a-z0-9_]*)\b',  # snake_case
-            r'\b([A-Z][a-zA-Z0-9]*)\b',  # CamelCase
-        ]
-
-        names = []
-        for pattern in patterns:
-            matches = re.findall(pattern, query)
-            names.extend(matches)
-
-        # 过滤常见关键词
-        stop_words = {
-            'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been',
-            'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will',
-            'would', 'could', 'should', 'may', 'might', 'must', 'shall',
-            'can', 'need', 'dare', 'ought', 'used', 'to', 'of', 'in',
-            'for', 'on', 'with', 'at', 'by', 'from', 'as', 'into',
-            'through', 'during', 'before', 'after', 'above', 'below',
-            'between', 'under', 'again', 'further', 'then', 'once',
-            'function', 'class', 'method', 'variable', 'module', 'import',
-            'find', 'search', 'get', 'query', 'show', 'list', 'what', 'how',
-            'where', 'which', 'when', 'who', 'why', 'all', 'each', 'every',
-            'both', 'few', 'more', 'most', 'other', 'some', 'such', 'no',
-            'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very'
-        }
-
-        filtered = [n for n in names if n.lower() not in stop_words and len(n) > 2]
-        return list(dict.fromkeys(filtered))[:10]  # 去重并限制数量
+        seeds = []
+        for c in chunks[:n]:
+            md = c.get("metadata") or {}
+            seeds.append({
+                "name": md.get("name"),
+                "module_path": md.get("module_path"),
+                "class_name": md.get("class_name"),
+                "type": md.get("type"),
+                "relevance_score": c.get("relevance_score", 0),
+            })
+        return seeds
 
     def _build_combined_context(self, result: Dict[str, Any]) -> str:
         """构建组合上下文字符串"""
@@ -181,16 +166,11 @@ class CodeGraphRetriever:
         if graph_ctx:
             context_parts.append("图谱关系:")
             for ctx in graph_ctx[:10]:
-                if "name" in ctx:
-                    context_parts.append(
-                        f"  - {ctx.get('name')} ({ctx.get('module_path', '')})"
-                    )
-                elif "entity" in ctx:
-                    context_parts.append(
-                        f"  - {ctx['entity']}: "
-                        f"{ctx.get('callers_count', 0)} 调用者, "
-                        f"{ctx.get('callees_count', 0)} 被调用"
-                    )
+                relation = ctx.get("relation", "related")
+                module_path = ctx.get("module_path") or ""
+                context_parts.append(
+                    f"  - {ctx.get('name')} [{relation}] ({module_path})"
+                )
 
         return "\n".join(context_parts) if context_parts else ""
 
