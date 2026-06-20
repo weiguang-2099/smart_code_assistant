@@ -11,13 +11,6 @@ from typing import List, Dict, Any, Optional
 from app.core.config import settings
 from app.core.llm_config import resolve_llm_config
 
-# Backward-compat constants (existing imports elsewhere keep working)
-ZHIPUAI_BASE_URL = "https://open.bigmodel.cn/api/paas/v4/"
-ZHIPUAI_MODEL = "glm-4"
-ZHIPUAI_MODEL_PLUS = "glm-4-plus"
-ZHIPUAI_MODEL_AIR = "glm-4-air"
-ZHIPUAI_MODEL_FLASH = "glm-4-flash"
-
 
 class LLMService:
     """Provider-agnostic chat service. LLM construction is deferred to first

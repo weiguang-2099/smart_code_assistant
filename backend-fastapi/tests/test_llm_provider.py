@@ -24,7 +24,7 @@ class TestPresetResolution:
     def test_zhipuai_default_tier(self):
         cfg = resolve_llm_config(fake_settings(ZHIPUAI_API_KEY="zk"))
         assert cfg.provider == "zhipuai"
-        assert cfg.model == "glm-4"
+        assert cfg.model == "glm-5.2"
         assert cfg.base_url == "https://open.bigmodel.cn/api/paas/v4/"
         assert cfg.api_key == "zk"
 
@@ -38,7 +38,7 @@ class TestPresetResolution:
         assert cfg.base_url == "https://api.openai.com/v1"
 
     @pytest.mark.parametrize("tier,expected", [
-        ("fast", "glm-4-flash"), ("quality", "glm-4-plus"), ("light", "glm-4-air"),
+        ("fast", "glm-4.7"), ("quality", "glm-5.2"), ("light", "glm-5.1"),
     ])
     def test_zhipuai_tiers(self, tier, expected):
         assert resolve_llm_config(fake_settings(), tier=tier).model == expected
@@ -97,7 +97,7 @@ class TestLLMServiceLazyInit:
     def test_construct_without_key_does_not_raise(self, monkeypatch):
         self._patch_settings(monkeypatch)
         svc = LLMService()  # no key anywhere -- must not raise here
-        assert svc.model == "glm-4"
+        assert svc.model == "glm-5.2"
 
     def test_first_llm_access_without_key_raises(self, monkeypatch):
         self._patch_settings(monkeypatch)
@@ -123,7 +123,7 @@ class TestLLMServiceLazyInit:
 
     def test_tier_quality_zhipuai(self, monkeypatch):
         self._patch_settings(monkeypatch, ZHIPUAI_API_KEY="zk")
-        assert LLMService(tier="quality").model == "glm-4-plus"
+        assert LLMService(tier="quality").model == "glm-5.2"
 
     def test_alias_is_same_class(self):
         assert LangChainGLMService is LLMService

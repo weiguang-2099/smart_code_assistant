@@ -35,7 +35,7 @@ from app.schemas.agent import (
     AgentNameSuggestionRequest,
     AgentNameSuggestionResponse,
 )
-from app.services.glm_service import glm_service
+from app.services.langchain_glm_service import langchain_glm_service
 from app.models.user import User
 from app.models.agent import Agent, Conversation, Message, TrainingTask
 
@@ -83,7 +83,7 @@ async def suggest_agent_name(
 
     try:
         # Call GLM service
-        response = await glm_service.chat(
+        response = await langchain_glm_service.chat(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             temperature=0.8,  # Higher temperature for more creativity
