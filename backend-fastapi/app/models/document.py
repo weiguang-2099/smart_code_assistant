@@ -3,7 +3,7 @@ Document models for Raw materials library and version control.
 """
 from datetime import datetime
 from enum import Enum
-from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, Boolean, BigInteger, JSON
+from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, Boolean, BigInteger, JSON, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -43,10 +43,17 @@ class Document(Base):
 
     __tablename__ = "documents"
 
+    # document_number is generated per-user (DOC-YYYYMMDD-NNN), so its uniqueness
+    # is scoped to the owner - a global unique constraint would make two users'
+    # first document of the day collide on DOC-...-001.
+    __table_args__ = (
+        UniqueConstraint("user_id", "document_number", name="uq_documents_user_document_number"),
+    )
+
     id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     title = Column(String(255), nullable=False)
-    document_number = Column(String(20), unique=True, index=True, nullable=True)  # 文档编号
+    document_number = Column(String(20), index=True, nullable=True)  # 文档编号 (unique per user)
     description = Column(Text, nullable=True)
     category = Column(String(100), nullable=True, index=True)
     project_id = Column(Integer, ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True)
