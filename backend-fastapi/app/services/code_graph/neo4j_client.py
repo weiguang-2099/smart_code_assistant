@@ -240,10 +240,18 @@ class Neo4jClient:
         callee_class: Optional[str] = None
     ) -> None:
         """创建函数调用关系"""
+        # ``class_name`` is NULL for module-level functions, and Cypher refuses to
+        # match a null inside a property map (``{class_name: null}`` matches
+        # nothing). The old query carried class_name in the caller map, so every
+        # CALLS edge whose caller was a top-level function (register, login, ...)
+        # was silently dropped while methods worked. Match the caller by
+        # name+module and compare class_name with null-coalescing so both methods
+        # and module-level functions resolve. (The old callee WHERE was a
+        # tautology and is removed.)
         query = """
-        MATCH (caller:Function {name: $caller_function, module_path: $caller_module, class_name: $caller_class})
+        MATCH (caller:Function {name: $caller_function, module_path: $caller_module})
+        WHERE coalesce(caller.class_name, '') = coalesce($caller_class, '')
         MATCH (callee:Function {name: $callee_function})
-        WHERE callee.module_path = $caller_module OR callee.module_path <> $caller_module
         MERGE (caller)-[:CALLS]->(callee)
         """
         await self.execute_query(query, {
